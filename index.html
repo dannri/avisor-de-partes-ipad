@@ -32,12 +32,139 @@
     }
     /* Prevent overscroll bounce on iPad Safari */
     html, body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+
+    /* Password gate (loads before the app) */
+    #__gate__ {
+      position: fixed; inset: 0;
+      background: linear-gradient(135deg, #161040 0%, #0d1035 45%, #07080f 100%);
+      z-index: 2147483647;
+      display: flex; align-items: center; justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, sans-serif;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+    #__gate__ .card {
+      background: rgba(255,255,255,0.05);
+      -webkit-backdrop-filter: blur(20px);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 20px;
+      padding: 40px 32px;
+      width: 86%;
+      max-width: 380px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+    #__gate__ h1 {
+      color: #fff; font-size: 16px; font-weight: 700;
+      margin: 0 0 24px; text-align: center; letter-spacing: 2px;
+    }
+    #__gate__ input {
+      width: 100%; box-sizing: border-box;
+      padding: 14px 16px; font-size: 17px;
+      background: rgba(255,255,255,0.08);
+      color: #fff; border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 10px; outline: none;
+      -webkit-appearance: none; appearance: none;
+      letter-spacing: 4px; text-align: center;
+    }
+    #__gate__ input::placeholder { letter-spacing: normal; color: rgba(255,255,255,0.4); }
+    #__gate__ input:focus { border-color: #5eadff; background: rgba(255,255,255,0.12); }
+    #__gate__ button {
+      width: 100%; margin-top: 14px; padding: 14px;
+      background: #3b82f6; color: #fff; border: none;
+      border-radius: 10px; font-size: 16px; font-weight: 600;
+      cursor: pointer; -webkit-tap-highlight-color: transparent;
+    }
+    #__gate__ button:disabled { opacity: 0.5; }
+    #__gate__ .err { color: #ff6b6b; font-size: 14px; text-align: center; min-height: 20px; margin-top: 12px; }
   </style>
-  <script type="module" crossorigin src="./assets/app.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/app.css">
 </head>
 <body>
   <div id="root"></div>
+
+  <!-- Password gate -->
+  <div id="__gate__">
+    <div class="card">
+      <h1>AVISOR DE PARTES</h1>
+      <input type="password" id="__gate_pwd__" inputmode="numeric" placeholder="Contraseña" autocomplete="current-password" />
+      <button id="__gate_ok__">Entrar</button>
+      <div class="err" id="__gate_err__"></div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var HASH = '5d718fdeb733789c719569d2fb9d3f0b06a0466977fb7edf724938d06ee33e0e';
+      var SALT = 'avisor-partes-2026-iPad';
+      var ITERATIONS = 250000;
+      var STORAGE_KEY = '__avisor_auth_v1__';
+
+      function pbkdf2Hex(pwd) {
+        var enc = new TextEncoder();
+        return crypto.subtle.importKey(
+          'raw', enc.encode(pwd), { name: 'PBKDF2' }, false, ['deriveBits']
+        ).then(function (key) {
+          return crypto.subtle.deriveBits(
+            { name: 'PBKDF2', salt: enc.encode(SALT), iterations: ITERATIONS, hash: 'SHA-256' },
+            key, 256
+          );
+        }).then(function (bits) {
+          var arr = new Uint8Array(bits);
+          var hex = '';
+          for (var i = 0; i < arr.length; i++) {
+            hex += (arr[i] < 16 ? '0' : '') + arr[i].toString(16);
+          }
+          return hex;
+        });
+      }
+
+      function loadApp() {
+        var gate = document.getElementById('__gate__');
+        if (gate && gate.parentNode) gate.parentNode.removeChild(gate);
+        var css = document.createElement('link');
+        css.rel = 'stylesheet'; css.crossOrigin = ''; css.href = './assets/app.css';
+        document.head.appendChild(css);
+        var s = document.createElement('script');
+        s.type = 'module'; s.crossOrigin = ''; s.src = './assets/app.js';
+        document.head.appendChild(s);
+      }
+
+      // Already authenticated on this device?
+      try {
+        if (localStorage.getItem(STORAGE_KEY) === '1') {
+          loadApp();
+          return;
+        }
+      } catch (e) {}
+
+      var input = document.getElementById('__gate_pwd__');
+      var btn = document.getElementById('__gate_ok__');
+      var err = document.getElementById('__gate_err__');
+
+      function tryAuth() {
+        btn.disabled = true;
+        err.textContent = 'Comprobando...';
+        pbkdf2Hex(input.value).then(function (hex) {
+          if (hex === HASH) {
+            try { localStorage.setItem(STORAGE_KEY, '1'); } catch (e) {}
+            loadApp();
+          } else {
+            btn.disabled = false;
+            err.textContent = 'Contraseña incorrecta';
+            input.value = '';
+            input.focus();
+          }
+        }).catch(function (e) {
+          btn.disabled = false;
+          err.textContent = 'Error: ' + (e && e.message ? e.message : 'desconocido');
+        });
+      }
+
+      btn.addEventListener('click', tryAuth);
+      input.addEventListener('keydown', function (e) { if (e.key === 'Enter') tryAuth(); });
+      // Focus after a tick so iOS shows the keyboard
+      setTimeout(function () { try { input.focus(); } catch (e) {} }, 100);
+    })();
+  </script>
   <script>
     (function () {
       function stripDiacritics(s) {
