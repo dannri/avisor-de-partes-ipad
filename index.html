@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>AVISOR DE PARTES</title>
+
+  <!-- PWA / iPad -->
+  <link rel="manifest" href="./manifest.json" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="AVISOR DE PARTES" />
+  <meta name="theme-color" content="#161040" />
+  <link rel="apple-touch-icon" href="./icon-180.png" />
+  <link rel="apple-touch-icon" sizes="152x152" href="./icon-180.png" />
+  <link rel="apple-touch-icon" sizes="167x167" href="./icon-180.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="./icon-180.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="./icon-512.png" />
+
+  <style>
+    body { margin: 0; padding: 0; }
+    /* iPad PWA: respect safe areas (notch / home indicator) */
+    @supports (padding: env(safe-area-inset-top)) {
+      body {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+        background: #161040;
+      }
+    }
+    /* Prevent overscroll bounce on iPad Safari */
+    html, body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+  </style>
+  <script type="module" crossorigin src="./assets/app.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/app.css">
+</head>
+<body>
+  <div id="root"></div>
+  <script>
+    (function () {
+      function stripDiacritics(s) {
+        return s.normalize ? s.normalize('NFD').replace(/[̀-ͯ]/g, '') : s;
+      }
+
+      function findMenuBackButton() {
+        var els = document.querySelectorAll('button, [role="button"]');
+        for (var i = 0; i < els.length; i++) {
+          if (els[i].id === '__refresh-btn__') continue;
+          var raw = (els[i].textContent || '').trim();
+          if (raw.length === 0 || raw.length > 15) continue;
+          var clean = stripDiacritics(raw.toUpperCase()).replace(/[^A-Z]/g, '');
+          if (clean === 'MENU' || clean === 'XMENU') return els[i];
+        }
+        return null;
+      }
+
+      function getCurrentScreenLabel() {
+        var nodes = document.querySelectorAll('h1, h2, h3, span, div, p');
+        var best = null;
+        for (var i = 0; i < nodes.length; i++) {
+          var n = nodes[i];
+          if (n.children.length > 2) continue;
+          var rect = n.getBoundingClientRect();
+          if (rect.top < 0 || rect.top > 90) continue;
+          if (rect.width === 0) continue;
+          var t = (n.textContent || '').trim();
+          if (t.length < 4 || t.length > 60) continue;
+          if (/^[\d\s\/\-:.]+$/.test(t)) continue;
+          var up = stripDiacritics(t.toUpperCase());
+          if (up.indexOf('MEN') === 0 && t.length < 8) continue;
+          if (!best || t.length > best.length) best = t;
+        }
+        return best;
+      }
+
+      function tryRestoreNavigation() {
+        var label = sessionStorage.getItem('__restoreScreen__');
+        if (!label) return;
+        var keywords = stripDiacritics(label.toUpperCase()).split(/\s+/).filter(function (w) { return w.length >= 4; });
+        if (keywords.length === 0) { sessionStorage.removeItem('__restoreScreen__'); return; }
+
+        var attempts = 0;
+        var iv = setInterval(function () {
+          attempts++;
+          var cards = document.querySelectorAll('button, [role="button"]');
+          for (var i = 0; i < cards.length; i++) {
+            if (cards[i].id === '__refresh-btn__') continue;
+            var t = stripDiacritics((cards[i].textContent || '').toUpperCase());
+            if (t.length === 0 || t.length > 40) continue;
+            for (var k = 0; k < keywords.length; k++) {
+              var prefix = keywords[k].substring(0, 5);
+              if (prefix.length >= 4 && t.indexOf(prefix) !== -1) {
+                sessionStorage.removeItem('__restoreScreen__');
+                clearInterval(iv);
+                try { cards[i].click(); } catch (e) {}
+                return;
+              }
+            }
+          }
+          if (attempts >= 30) {
+            sessionStorage.removeItem('__restoreScreen__');
+            clearInterval(iv);
+          }
+        }, 200);
+      }
+
+      function injectRefreshButton() {
+        var menuBtn = findMenuBackButton();
+        var existing = document.getElementById('__refresh-btn__');
+
+        // Not on a sub-screen — remove any leftover refresh button
+        if (!menuBtn) {
+          if (existing && existing.parentElement) existing.parentElement.removeChild(existing);
+          return;
+        }
+
+        var mr = menuBtn.getBoundingClientRect();
+        var mrCenterY = mr.top + mr.height / 2;
+        var mrRight = mr.right;
+
+        // Validate existing button: must be vertically near MENU and to its right
+        if (existing) {
+          var er = existing.getBoundingClientRect();
+          var erCenterY = er.top + er.height / 2;
+          if (er.width === 0 || er.height === 0 ||
+              Math.abs(erCenterY - mrCenterY) > 25 ||
+              er.left < mrRight - 5) {
+            if (existing.parentElement) existing.parentElement.removeChild(existing);
+            existing = null;
+          } else {
+            return;
+          }
+        }
+
+        var all = document.querySelectorAll('button, [role="button"]');
+        var groupsArr = [];
+        var seenParents = [];
+        for (var i = 0; i < all.length; i++) {
+          var el = all[i];
+          if (el.id === '__refresh-btn__') continue;
+          if (el === menuBtn) continue;
+          if (!el.querySelector('svg')) continue;
+          var txt = (el.textContent || '').replace(/\s/g, '');
+          if (txt.length > 2) continue;
+          var rect = el.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) continue;
+          var elCenterY = rect.top + rect.height / 2;
+          // Must be vertically aligned with MENU (same header row)
+          if (Math.abs(elCenterY - mrCenterY) > 25) continue;
+          // Must be to the right of MENU (where the icon cluster lives)
+          if (rect.left < mrRight - 5) continue;
+          var p = el.parentElement;
+          if (!p) continue;
+          var idx = seenParents.indexOf(p);
+          if (idx === -1) {
+            seenParents.push(p);
+            groupsArr.push({ parent: p, items: [{ el: el, left: rect.left, top: rect.top }] });
+          } else {
+            groupsArr[idx].items.push({ el: el, left: rect.left, top: rect.top });
+          }
+        }
+
+        var candidates = groupsArr.filter(function (g) { return g.items.length >= 2; });
+        if (candidates.length === 0) return;
+
+        candidates.sort(function (a, b) {
+          if (b.items.length !== a.items.length) return b.items.length - a.items.length;
+          return a.items[0].top - b.items[0].top;
+        });
+        var best = candidates[0];
+        best.items.sort(function (a, b) { return a.left - b.left; });
+        var template = best.items[0].el;
+        var parent = best.parent;
+
+        var btn = document.createElement('button');
+        btn.id = '__refresh-btn__';
+        btn.className = template.className;
+        btn.title = 'Actualizar datos';
+        btn.style.display = template.style.display || '';
+        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:block;margin:auto"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>';
+
+        function handleClick(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+          if (btn.dataset.clicked === '1') return;
+          btn.dataset.clicked = '1';
+          btn.style.opacity = '0.5';
+          btn.style.pointerEvents = 'none';
+          var label = getCurrentScreenLabel();
+          if (label) sessionStorage.setItem('__restoreScreen__', label);
+          // small delay so the visual feedback shows
+          setTimeout(function () { window.location.reload(); }, 30);
+        }
+        btn.addEventListener('click', handleClick, true);
+        btn.addEventListener('touchend', handleClick, true);
+
+        parent.insertBefore(btn, template);
+      }
+
+      function injectPartesGlow() {
+        var buttons = document.querySelectorAll('button');
+        for (var i = 0; i < buttons.length; i++) {
+          var b = buttons[i];
+          if (b.dataset.glowFixed === '1') continue;
+          var txt = (b.textContent || '').toUpperCase();
+          if (txt.indexOf('PARTES') === -1 && txt.indexOf('INCIDENCIAS') === -1) continue;
+
+          b.dataset.glowFixed = '1';
+          b.style.boxShadow = '0 0 24px 4px rgba(245,158,11,0.5), 0 0 60px 2px rgba(245,158,11,0.15), inset 0 0 20px 0px rgba(245,158,11,0.1)';
+          b.style.position = b.style.position || 'relative';
+          b.style.overflow = 'hidden';
+          if (!b.classList.contains('card-hover-shine')) b.classList.add('card-hover-shine');
+          if (!b.querySelector('.__glow-shine__')) {
+            var shine = document.createElement('div');
+            shine.className = 'card-shine-sweep __glow-shine__';
+            b.appendChild(shine);
+          }
+        }
+      }
+
+      function replaceBgWithSVG() {
+        var s = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 800" preserveAspectRatio="xMidYMid slice">';
+        s += '<defs>';
+        s += '<linearGradient id="inj_bg" x1="0%" y1="0%" x2="100%" y2="100%">';
+        s += '<stop offset="0%" stop-color="#161040"/>';
+        s += '<stop offset="45%" stop-color="#0d1035"/>';
+        s += '<stop offset="100%" stop-color="#07080f"/>';
+        s += '</linearGradient>';
+        s += '<radialGradient id="inj_ambL" cx="300" cy="250" r="420" gradientUnits="userSpaceOnUse">';
+        s += '<stop offset="0%" stop-color="#2a1a70" stop-opacity="0.45"/>';
+        s += '<stop offset="100%" stop-color="#0d1035" stop-opacity="0"/>';
+        s += '</radialGradient>';
+        s += '<radialGradient id="inj_ambR" cx="980" cy="580" r="360" gradientUnits="userSpaceOnUse">';
+        s += '<stop offset="0%" stop-color="#1a1558" stop-opacity="0.35"/>';
+        s += '<stop offset="100%" stop-color="#07080f" stop-opacity="0"/>';
+        s += '</radialGradient>';
+        s += '<radialGradient id="inj_glowB" cx="50%" cy="50%" r="50%">';
+        s += '<stop offset="0%" stop-color="#5eadff" stop-opacity="0.95"/>';
+        s += '<stop offset="40%" stop-color="#3b82f6" stop-opacity="0.4"/>';
+        s += '<stop offset="100%" stop-color="#1e40af" stop-opacity="0"/>';
+        s += '</radialGradient>';
+        s += '<radialGradient id="inj_glowT" cx="50%" cy="50%" r="50%">';
+        s += '<stop offset="0%" stop-color="#5fffea" stop-opacity="0.95"/>';
+        s += '<stop offset="40%" stop-color="#14b8a6" stop-opacity="0.4"/>';
+        s += '<stop offset="100%" stop-color="#0d9488" stop-opacity="0"/>';
+        s += '</radialGradient>';
+        s += '<radialGradient id="inj_glowO" cx="50%" cy="50%" r="50%">';
+        s += '<stop offset="0%" stop-color="#ffb860" stop-opacity="0.95"/>';
+        s += '<stop offset="40%" stop-color="#f97316" stop-opacity="0.4"/>';
+        s += '<stop offset="100%" stop-color="#c2410c" stop-opacity="0"/>';
+        s += '</radialGradient>';
+        s += '<radialGradient id="inj_vign" cx="50%" cy="50%" r="72%" gradientUnits="objectBoundingBox">';
+        s += '<stop offset="55%" stop-color="transparent"/>';
+        s += '<stop offset="100%" stop-color="#000000" stop-opacity="0.6"/>';
+        s += '</radialGradient>';
+        s += '<filter id="inj_fBlur" x="-80%" y="-80%" width="260%" height="260%">';
+        s += '<feGaussianBlur stdDeviation="14"/>';
+        s += '</filter>';
+        s += '<filter id="inj_fSm" x="-40%" y="-40%" width="180%" height="180%">';
+        s += '<feGaussianBlur stdDeviation="3"/>';
+        s += '</filter>';
+        s += '</defs>';
+        s += '<rect width="1280" height="800" fill="url(#inj_bg)"/>';
+        s += '<rect width="1280" height="800" fill="url(#inj_ambL)"/>';
+        s += '<rect width="1280" height="800" fill="url(#inj_ambR)"/>';
+        s += '<g stroke="rgba(80,120,200,0.2)" stroke-width="1" fill="none">';
+        s += '<line x1="1266" y1="0" x2="1280" y2="8"/>';
+        s += '<line x1="1146" y1="0" x2="1280" y2="77"/>';
+        s += '<line x1="1027" y1="0" x2="1280" y2="146"/>';
+        s += '<line x1="908" y1="0" x2="1280" y2="215"/>';
+        s += '<line x1="788" y1="0" x2="1280" y2="284"/>';
+        s += '<line x1="669" y1="0" x2="1280" y2="353"/>';
+        s += '<line x1="549" y1="0" x2="1280" y2="422"/>';
+        s += '<line x1="430" y1="0" x2="1280" y2="491"/>';
+        s += '<line x1="310" y1="0" x2="1280" y2="560"/>';
+        s += '<line x1="190" y1="0" x2="1280" y2="629"/>';
+        s += '<line x1="71" y1="0" x2="1280" y2="698"/>';
+        s += '<line x1="0" y1="28" x2="1280" y2="767"/>';
+        s += '<line x1="0" y1="97" x2="1217" y2="800"/>';
+        s += '<line x1="0" y1="166" x2="1098" y2="800"/>';
+        s += '<line x1="0" y1="235" x2="979" y2="800"/>';
+        s += '<line x1="0" y1="304" x2="859" y2="800"/>';
+        s += '<line x1="0" y1="373" x2="740" y2="800"/>';
+        s += '<line x1="0" y1="442" x2="620" y2="800"/>';
+        s += '<line x1="0" y1="511" x2="501" y2="800"/>';
+        s += '<line x1="0" y1="580" x2="381" y2="800"/>';
+        s += '<line x1="0" y1="649" x2="261" y2="800"/>';
+        s += '<line x1="0" y1="718" x2="142" y2="800"/>';
+        s += '<line x1="0" y1="787" x2="22" y2="800"/>';
+        s += '<line x1="0" y1="69" x2="119" y2="0"/>';
+        s += '<line x1="0" y1="138" x2="239" y2="0"/>';
+        s += '<line x1="0" y1="207" x2="358" y2="0"/>';
+        s += '<line x1="0" y1="276" x2="478" y2="0"/>';
+        s += '<line x1="0" y1="345" x2="597" y2="0"/>';
+        s += '<line x1="0" y1="414" x2="717" y2="0"/>';
+        s += '<line x1="0" y1="483" x2="836" y2="0"/>';
+        s += '<line x1="0" y1="552" x2="956" y2="0"/>';
+        s += '<line x1="0" y1="621" x2="1075" y2="0"/>';
+        s += '<line x1="0" y1="690" x2="1195" y2="0"/>';
+        s += '<line x1="0" y1="759" x2="1280" y2="20"/>';
+        s += '<line x1="48" y1="800" x2="1280" y2="89"/>';
+        s += '<line x1="168" y1="800" x2="1280" y2="158"/>';
+        s += '<line x1="287" y1="800" x2="1280" y2="227"/>';
+        s += '<line x1="407" y1="800" x2="1280" y2="296"/>';
+        s += '<line x1="526" y1="800" x2="1280" y2="365"/>';
+        s += '<line x1="646" y1="800" x2="1280" y2="434"/>';
+        s += '<line x1="765" y1="800" x2="1280" y2="503"/>';
+        s += '<line x1="885" y1="800" x2="1280" y2="572"/>';
+        s += '<line x1="1004" y1="800" x2="1280" y2="641"/>';
+        s += '<line x1="1124" y1="800" x2="1280" y2="710"/>';
+        s += '<line x1="1244" y1="800" x2="1280" y2="779"/>';
+        s += '<line x1="80" y1="0" x2="80" y2="800"/>';
+        s += '<line x1="160" y1="0" x2="160" y2="800"/>';
+        s += '<line x1="240" y1="0" x2="240" y2="800"/>';
+        s += '<line x1="320" y1="0" x2="320" y2="800"/>';
+        s += '<line x1="400" y1="0" x2="400" y2="800"/>';
+        s += '<line x1="480" y1="0" x2="480" y2="800"/>';
+        s += '<line x1="560" y1="0" x2="560" y2="800"/>';
+        s += '<line x1="640" y1="0" x2="640" y2="800"/>';
+        s += '<line x1="720" y1="0" x2="720" y2="800"/>';
+        s += '<line x1="800" y1="0" x2="800" y2="800"/>';
+        s += '<line x1="880" y1="0" x2="880" y2="800"/>';
+        s += '<line x1="960" y1="0" x2="960" y2="800"/>';
+        s += '<line x1="1040" y1="0" x2="1040" y2="800"/>';
+        s += '<line x1="1120" y1="0" x2="1120" y2="800"/>';
+        s += '<line x1="1200" y1="0" x2="1200" y2="800"/>';
+        s += '</g>';
+        s += '<g filter="url(#inj_fBlur)" opacity="0.7">';
+        s += '<circle cx="160" cy="118" r="32" fill="url(#inj_glowB)"/>';
+        s += '<circle cx="640" cy="393" r="38" fill="url(#inj_glowT)"/>';
+        s += '<circle cx="1120" cy="600" r="30" fill="url(#inj_glowB)"/>';
+        s += '<circle cx="400" cy="256" r="30" fill="url(#inj_glowB)"/>';
+        s += '<circle cx="880" cy="531" r="30" fill="url(#inj_glowT)"/>';
+        s += '<circle cx="160" cy="49" r="24" fill="url(#inj_glowO)"/>';
+        s += '<circle cx="480" cy="235" r="28" fill="url(#inj_glowB)"/>';
+        s += '<circle cx="240" cy="166" r="26" fill="url(#inj_glowT)"/>';
+        s += '<circle cx="800" cy="428" r="32" fill="url(#inj_glowO)"/>';
+        s += '<circle cx="480" cy="304" r="26" fill="url(#inj_glowB)"/>';
+        s += '<circle cx="960" cy="240" r="28" fill="url(#inj_glowT)"/>';
+        s += '<circle cx="560" cy="520" r="34" fill="url(#inj_glowO)"/>';
+        s += '<circle cx="1120" cy="90" r="26" fill="url(#inj_glowB)"/>';
+        s += '<circle cx="320" cy="152" r="24" fill="url(#inj_glowT)"/>';
+        s += '<circle cx="800" cy="700" r="28" fill="url(#inj_glowO)"/>';
+        s += '<circle cx="720" cy="162" r="28" fill="url(#inj_glowB)"/>';
+        s += '<circle cx="1200" cy="480" r="24" fill="url(#inj_glowT)"/>';
+        s += '<circle cx="240" cy="700" r="26" fill="url(#inj_glowB)"/>';
+        s += '<circle cx="1040" cy="773" r="24" fill="url(#inj_glowT)"/>';
+        s += '<circle cx="40" cy="380" r="22" fill="url(#inj_glowO)"/>';
+        s += '</g>';
+        s += '<g filter="url(#inj_fSm)">';
+        s += '<circle cx="160" cy="118" r="7" fill="#a8d8ff" opacity="0.95"/>';
+        s += '<circle cx="640" cy="393" r="9" fill="#80ffe8" opacity="0.95"/>';
+        s += '<circle cx="1120" cy="600" r="7" fill="#a8d8ff" opacity="0.9"/>';
+        s += '<circle cx="400" cy="256" r="7" fill="#9ad0ff" opacity="0.9"/>';
+        s += '<circle cx="880" cy="531" r="7" fill="#80ffe8" opacity="0.9"/>';
+        s += '<circle cx="160" cy="49" r="6" fill="#ffc070" opacity="0.92"/>';
+        s += '<circle cx="480" cy="235" r="7" fill="#9ad0ff" opacity="0.9"/>';
+        s += '<circle cx="240" cy="166" r="6" fill="#80ffe8" opacity="0.9"/>';
+        s += '<circle cx="800" cy="428" r="8" fill="#ffc070" opacity="0.95"/>';
+        s += '<circle cx="480" cy="304" r="6" fill="#a8d8ff" opacity="0.9"/>';
+        s += '<circle cx="960" cy="240" r="7" fill="#80ffe8" opacity="0.9"/>';
+        s += '<circle cx="560" cy="520" r="9" fill="#ffc070" opacity="0.95"/>';
+        s += '<circle cx="1120" cy="90" r="6" fill="#a8d8ff" opacity="0.9"/>';
+        s += '<circle cx="320" cy="152" r="6" fill="#80ffe8" opacity="0.88"/>';
+        s += '<circle cx="800" cy="700" r="7" fill="#ffc070" opacity="0.9"/>';
+        s += '<circle cx="720" cy="162" r="7" fill="#a8d8ff" opacity="0.9"/>';
+        s += '<circle cx="1200" cy="480" r="6" fill="#80ffe8" opacity="0.88"/>';
+        s += '<circle cx="240" cy="700" r="6" fill="#a8d8ff" opacity="0.88"/>';
+        s += '<circle cx="1040" cy="773" r="6" fill="#80ffe8" opacity="0.88"/>';
+        s += '<circle cx="40" cy="380" r="5" fill="#ffc070" opacity="0.85"/>';
+        s += '</g>';
+        s += '<rect width="1280" height="800" fill="url(#inj_vign)"/>';
+        s += '</svg>';
+
+        var uri = 'url("data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s) + '")';
+        var all = document.querySelectorAll('*');
+        for (var i = 0; i < all.length; i++) {
+          var el = all[i];
+          if (el.dataset && el.dataset.bgReplaced === '1') continue;
+          if (el.style && el.style.backgroundImage && el.style.backgroundImage.indexOf('fondo.jpg') !== -1) {
+            el.style.backgroundImage = uri;
+            el.style.backgroundSize = 'cover';
+            el.style.backgroundPosition = 'center';
+            if (el.dataset) el.dataset.bgReplaced = '1';
+          }
+        }
+      }
+
+      var __lastFitScreen = '';
+      function autoFitEyeView() {
+        var label = getCurrentScreenLabel();
+        if (!label) { __lastFitScreen = ''; return; }
+        var up = stripDiacritics(label.toUpperCase());
+        var isTarget = up.indexOf('NOCHE') !== -1 ||
+                       up.indexOf('URBAN') !== -1 ||
+                       up.indexOf('TARDE') !== -1 ||
+                       up.indexOf('ESTADO') !== -1;
+        if (!isTarget) { __lastFitScreen = ''; return; }
+        if (__lastFitScreen === label) return;
+        var eyeBtn = document.querySelector('button[title="Ajustar pantalla"]');
+        if (!eyeBtn) return;
+        __lastFitScreen = label;
+        try { eyeBtn.click(); } catch (e) {}
+      }
+
+      function fixTextoEditMode() {
+        var selects = document.querySelectorAll('select');
+        for (var i = 0; i < selects.length; i++) {
+          var sel = selects[i];
+          var hasTexto = false;
+          for (var j = 0; j < sel.options.length; j++) {
+            if (sel.options[j].value === '__TEXTO__') { hasTexto = true; break; }
+          }
+          if (!hasTexto) continue;
+          if (sel.value !== '') continue;
+          if (sel.dataset.textoFixed === '1') continue;
+          try {
+            var fiberKey = null;
+            var keys = Object.keys(sel);
+            for (var k = 0; k < keys.length; k++) {
+              if (keys[k].startsWith('__reactFiber$')) { fiberKey = keys[k]; break; }
+            }
+            if (!fiberKey) continue;
+            var node = sel[fiberKey];
+            var sdFiber = null;
+            for (var depth = 0; depth < 8; depth++) {
+              node = node.return;
+              if (!node) break;
+              if (typeof node.type !== 'function') continue;
+              var h0 = node.memoizedState;
+              var h1 = h0 && h0.next;
+              if (h0 && typeof h0.memoizedState === 'string' &&
+                  h1 && typeof h1.memoizedState === 'string' &&
+                  h0.memoizedState === '' && h1.memoizedState !== '') {
+                sdFiber = node;
+                break;
+              }
+            }
+            if (!sdFiber) continue;
+            var dispatch = sdFiber.memoizedState.queue && sdFiber.memoizedState.queue.dispatch;
+            if (!dispatch) continue;
+            sel.dataset.textoFixed = '1';
+            dispatch('__TEXTO__');
+          } catch(e) {}
+        }
+        var allSels = document.querySelectorAll('select[data-texto-fixed="1"]');
+        for (var m = 0; m < allSels.length; m++) {
+          if (allSels[m].value !== '') delete allSels[m].dataset.textoFixed;
+        }
+      }
+
+      function runInjections() {
+        injectRefreshButton();
+        injectPartesGlow();
+        replaceBgWithSVG();
+        autoFitEyeView();
+        fixTextoEditMode();
+      }
+
+      var observer = new MutationObserver(runInjections);
+      observer.observe(document.documentElement, { childList: true, subtree: true });
+      document.addEventListener('DOMContentLoaded', function () {
+        runInjections();
+        tryRestoreNavigation();
+      });
+      // If load already happened
+      if (document.readyState !== 'loading') tryRestoreNavigation();
+      setInterval(runInjections, 700);
+    })();
+
+    // PWA service worker registration (offline support)
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('./service-worker.js').catch(function (err) {
+          console.warn('SW registration failed:', err);
+        });
+      });
+    }
+  </script>
+</body>
+</html>
