@@ -35,16 +35,21 @@
     /* Block pinch-zoom on iPad Safari (iOS 26 ignores user-scalable=no) */
     html, body { touch-action: pan-x pan-y; }
 
-    /* Force uniform row height: all <tr> must be identical, no row can stretch
-       (fixes the giant yellow gap between 3137 and 3085 that breaks the table) */
-    table { table-layout: fixed !important; }
-    table tr {
+    /* Unify the table: hide vertical group labels (CARGAS LATERALES / TRASERAS)
+       so the whole table behaves as one continuous block and the eye-button zoom
+       affects every row equally. Tagged dynamically via JS below. */
+    table tr[data-group-label-row="1"] > td:first-child,
+    table td[data-group-label-cell="1"] {
+      display: none !important;
+    }
+    /* Force uniform row height so no row can stretch and create a gap */
+    table tr[data-uniform-row="1"] {
       height: 40px !important;
       max-height: 40px !important;
       min-height: 0 !important;
     }
-    table tr > td,
-    table tr > th {
+    table tr[data-uniform-row="1"] > td,
+    table tr[data-uniform-row="1"] > th {
       height: 40px !important;
       max-height: 40px !important;
       overflow: hidden !important;
@@ -611,12 +616,51 @@
         }
       }
 
+      function unifyTableGroups() {
+        // Hide vertical "CARGAS LATERALES" / "TRASERAS" group-label cells
+        // (they use rowspan>1 and contain those labels) so the table looks unified.
+        var cells = document.querySelectorAll('td[rowspan]');
+        for (var i = 0; i < cells.length; i++) {
+          var c = cells[i];
+          if (c.dataset.groupLabelCell === '1') continue;
+          var txt = (c.textContent || '').toUpperCase();
+          if (txt.indexOf('CARGAS LATERALES') !== -1 ||
+              txt.indexOf('TRASERAS') !== -1 ||
+              txt.indexOf('OTROS') !== -1) {
+            c.dataset.groupLabelCell = '1';
+          }
+        }
+        // Mark all data rows for uniform-height CSS
+        var rows = document.querySelectorAll('table tr');
+        for (var r = 0; r < rows.length; r++) {
+          if (rows[r].dataset.uniformRow !== '1') {
+            rows[r].dataset.uniformRow = '1';
+          }
+        }
+      }
+
+      function renameUrbButton() {
+        // Submenu service button: "URBANIZ." -> "URB."
+        var nodes = document.querySelectorAll('button, span, div');
+        for (var i = 0; i < nodes.length; i++) {
+          var n = nodes[i];
+          if (n.dataset.urbRenamed === '1') continue;
+          // Only text nodes that EXACTLY match "URBANIZ." (avoid replacing headers like "URBANIZACIONES")
+          if (n.children.length === 0 && n.textContent && n.textContent.trim() === 'URBANIZ.') {
+            n.textContent = 'URB.';
+            n.dataset.urbRenamed = '1';
+          }
+        }
+      }
+
       function runInjections() {
         injectRefreshButton();
         injectPartesGlow();
         replaceBgWithSVG();
         autoFitEyeView();
         fixTextoEditMode();
+        unifyTableGroups();
+        renameUrbButton();
       }
 
       var observer = new MutationObserver(runInjections);
