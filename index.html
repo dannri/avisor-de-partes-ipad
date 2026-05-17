@@ -517,26 +517,34 @@
       }
 
       var __lastFitScreen = '';
-      var __lastFitRowCount = 0;
+      var __lastFitHeight = 0;
+      var __fitPending = false;
+      function _triggerFit() {
+        if (__fitPending) return;
+        __fitPending = true;
+        setTimeout(function() {
+          __fitPending = false;
+          var eyeBtn = document.querySelector('button[title="Ajustar pantalla"]');
+          if (eyeBtn) { try { eyeBtn.click(); } catch(e) {} }
+        }, 300);
+      }
       function autoFitEyeView() {
         var label = getCurrentScreenLabel();
-        if (!label) { __lastFitScreen = ''; __lastFitRowCount = 0; return; }
+        if (!label) { __lastFitScreen = ''; __lastFitHeight = 0; return; }
         var up = stripDiacritics(label.toUpperCase());
         var isTarget = up.indexOf('NOCHE') !== -1 ||
                        up.indexOf('URBAN') !== -1 ||
                        up.indexOf('TARDE') !== -1 ||
                        up.indexOf('ESTADO') !== -1;
-        if (!isTarget) { __lastFitScreen = ''; __lastFitRowCount = 0; return; }
-        var rows = document.querySelectorAll('table tr');
-        var rowCount = rows.length;
+        if (!isTarget) { __lastFitScreen = ''; __lastFitHeight = 0; return; }
+        var table = document.querySelector('table');
+        var h = table ? table.scrollHeight : 0;
         var screenChanged = (__lastFitScreen !== label);
-        var tableGrew = (rowCount > __lastFitRowCount && __lastFitRowCount > 0);
-        if (!screenChanged && !tableGrew) return;
-        var eyeBtn = document.querySelector('button[title="Ajustar pantalla"]');
-        if (!eyeBtn) return;
+        var sizeChanged = (h !== __lastFitHeight && __lastFitHeight > 0);
+        if (!screenChanged && !sizeChanged) return;
         __lastFitScreen = label;
-        __lastFitRowCount = rowCount;
-        setTimeout(function() { try { eyeBtn.click(); } catch (e) {} }, 250);
+        __lastFitHeight = h;
+        _triggerFit();
       }
 
       function fixTextoEditMode() {
@@ -603,18 +611,12 @@
       if (document.readyState !== 'loading') tryRestoreNavigation();
       setInterval(runInjections, 700);
 
-      // Re-trigger autofit when user pinch-zooms back out
+      // Re-trigger autofit on any viewport resize (pinch-zoom, orientation change)
       if (window.visualViewport) {
-        var __lastVpScale = 1;
         window.visualViewport.addEventListener('resize', function() {
-          var scale = window.visualViewport.scale;
-          if (__lastVpScale !== 1 && scale < __lastVpScale) {
-            // zoom is decreasing — user is zooming out, reset so autofit fires again
-            __lastFitScreen = '';
-            __lastFitRowCount = 0;
-            setTimeout(autoFitEyeView, 300);
-          }
-          __lastVpScale = scale;
+          __lastFitScreen = '';
+          __lastFitHeight = 0;
+          autoFitEyeView();
         });
       }
     })();
