@@ -32,6 +32,8 @@
     }
     /* Prevent overscroll bounce on iPad Safari */
     html, body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+    /* Block pinch-zoom on iPad Safari (iOS 26 ignores user-scalable=no) */
+    html, body { touch-action: pan-x pan-y; }
 
     /* Password gate (loads before the app) */
     #__gate__ {
@@ -611,26 +613,16 @@
       if (document.readyState !== 'loading') tryRestoreNavigation();
       setInterval(runInjections, 700);
 
-      // BLOCK pinch-zoom completely (Safari iOS ignores user-scalable=no since iOS 10)
-      // Prevent multi-touch gestures
-      document.addEventListener('touchmove', function(e) {
+      // BLOCK pinch-zoom on iPad Safari (iOS 26 still allows it despite user-scalable=no)
+      // Multi-touch touchmove blocking — must use capture phase to beat any inner listeners
+      window.addEventListener('touchmove', function(e) {
         if (e.touches && e.touches.length > 1) {
           e.preventDefault();
         }
-      }, { passive: false });
-      // Prevent gesture events (Safari-specific pinch)
-      document.addEventListener('gesturestart', function(e) { e.preventDefault(); }, { passive: false });
-      document.addEventListener('gesturechange', function(e) { e.preventDefault(); }, { passive: false });
-      document.addEventListener('gestureend', function(e) { e.preventDefault(); }, { passive: false });
-      // Prevent double-tap zoom
-      var __lastTouchEnd = 0;
-      document.addEventListener('touchend', function(e) {
-        var now = Date.now();
-        if (now - __lastTouchEnd <= 350) {
-          e.preventDefault();
-        }
-        __lastTouchEnd = now;
-      }, { passive: false });
+      }, { passive: false, capture: true });
+      // Legacy Safari gesture events (still fire on iPad in some contexts)
+      window.addEventListener('gesturestart', function(e) { e.preventDefault(); }, { passive: false, capture: true });
+      window.addEventListener('gesturechange', function(e) { e.preventDefault(); }, { passive: false, capture: true });
 
       // Fallback: if zoom still happens somehow, reset on viewport resize
       if (window.visualViewport) {
