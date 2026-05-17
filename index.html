@@ -602,6 +602,21 @@
       // If load already happened
       if (document.readyState !== 'loading') tryRestoreNavigation();
       setInterval(runInjections, 700);
+
+      // Re-trigger autofit when user pinch-zooms back out
+      if (window.visualViewport) {
+        var __lastVpScale = 1;
+        window.visualViewport.addEventListener('resize', function() {
+          var scale = window.visualViewport.scale;
+          if (__lastVpScale !== 1 && scale < __lastVpScale) {
+            // zoom is decreasing — user is zooming out, reset so autofit fires again
+            __lastFitScreen = '';
+            __lastFitRowCount = 0;
+            setTimeout(autoFitEyeView, 300);
+          }
+          __lastVpScale = scale;
+        });
+      }
     })();
 
     // PWA service worker registration (offline support)
