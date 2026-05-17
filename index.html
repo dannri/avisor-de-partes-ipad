@@ -35,6 +35,22 @@
     /* Block pinch-zoom on iPad Safari (iOS 26 ignores user-scalable=no) */
     html, body { touch-action: pan-x pan-y; }
 
+    /* Force uniform row height: all <tr> must be identical, no row can stretch
+       (fixes the giant yellow gap between 3137 and 3085 that breaks the table) */
+    table { table-layout: fixed !important; }
+    table tr {
+      height: 40px !important;
+      max-height: 40px !important;
+      min-height: 0 !important;
+    }
+    table tr > td,
+    table tr > th {
+      height: 40px !important;
+      max-height: 40px !important;
+      overflow: hidden !important;
+      vertical-align: middle !important;
+    }
+
     /* Password gate (loads before the app) */
     #__gate__ {
       position: fixed; inset: 0;
