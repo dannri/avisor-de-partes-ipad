@@ -517,20 +517,26 @@
       }
 
       var __lastFitScreen = '';
+      var __lastFitRowCount = 0;
       function autoFitEyeView() {
         var label = getCurrentScreenLabel();
-        if (!label) { __lastFitScreen = ''; return; }
+        if (!label) { __lastFitScreen = ''; __lastFitRowCount = 0; return; }
         var up = stripDiacritics(label.toUpperCase());
         var isTarget = up.indexOf('NOCHE') !== -1 ||
                        up.indexOf('URBAN') !== -1 ||
                        up.indexOf('TARDE') !== -1 ||
                        up.indexOf('ESTADO') !== -1;
-        if (!isTarget) { __lastFitScreen = ''; return; }
-        if (__lastFitScreen === label) return;
+        if (!isTarget) { __lastFitScreen = ''; __lastFitRowCount = 0; return; }
+        var rows = document.querySelectorAll('table tr');
+        var rowCount = rows.length;
+        var screenChanged = (__lastFitScreen !== label);
+        var tableGrew = (rowCount > __lastFitRowCount && __lastFitRowCount > 0);
+        if (!screenChanged && !tableGrew) return;
         var eyeBtn = document.querySelector('button[title="Ajustar pantalla"]');
         if (!eyeBtn) return;
         __lastFitScreen = label;
-        try { eyeBtn.click(); } catch (e) {}
+        __lastFitRowCount = rowCount;
+        setTimeout(function() { try { eyeBtn.click(); } catch (e) {} }, 250);
       }
 
       function fixTextoEditMode() {
