@@ -35,12 +35,19 @@
     /* Block pinch-zoom on iPad Safari (iOS 26 ignores user-scalable=no) */
     html, body { touch-action: pan-x pan-y; }
 
-    /* Unify the table: hide vertical group labels (CARGAS LATERALES / TRASERAS)
-       so the whole table behaves as one continuous block and the eye-button zoom
-       affects every row equally. Tagged dynamically via JS below. */
-    table tr[data-group-label-row="1"] > td:first-child,
+    /* Unify the table: collapse vertical group labels (CARGAS LATERALES / TRASERAS)
+       to zero width so the table behaves as one continuous block, WITHOUT
+       removing the cell (display:none would shift other columns and break OTROS). */
     table td[data-group-label-cell="1"] {
-      display: none !important;
+      width: 0 !important;
+      max-width: 0 !important;
+      min-width: 0 !important;
+      padding: 0 !important;
+      border: 0 !important;
+      font-size: 0 !important;
+      color: transparent !important;
+      overflow: hidden !important;
+      white-space: nowrap !important;
     }
     /* Force uniform row height so no row can stretch and create a gap */
     table tr[data-uniform-row="1"] {
@@ -50,10 +57,13 @@
     }
     table tr[data-uniform-row="1"] > td,
     table tr[data-uniform-row="1"] > th {
-      height: 40px !important;
       max-height: 40px !important;
       overflow: hidden !important;
       vertical-align: middle !important;
+    }
+    table tr[data-uniform-row="1"] > td:not([data-group-label-cell="1"]),
+    table tr[data-uniform-row="1"] > th:not([data-group-label-cell="1"]) {
+      height: 40px !important;
     }
 
     /* Password gate (loads before the app) */
