@@ -35,35 +35,30 @@
     /* Block pinch-zoom on iPad Safari (iOS 26 ignores user-scalable=no) */
     html, body { touch-action: pan-x pan-y; }
 
-    /* Unify the table: collapse vertical group labels (CARGAS LATERALES / TRASERAS)
-       to zero width so the table behaves as one continuous block, WITHOUT
-       removing the cell (display:none would shift other columns and break OTROS). */
-    table td[data-group-label-cell="1"] {
-      width: 0 !important;
-      max-width: 0 !important;
-      min-width: 0 !important;
-      padding: 0 !important;
-      border: 0 !important;
-      font-size: 0 !important;
-      color: transparent !important;
-      overflow: hidden !important;
-      white-space: nowrap !important;
-    }
-    /* Force uniform row height so no row can stretch and create a gap */
+    /* Force every table row to have a fixed height regardless of content/zoom.
+       The yellow gap on row 3137 happens because the app gives that row
+       height:auto and the flex container lets it stretch to fill space. */
     table tr[data-uniform-row="1"] {
       height: 40px !important;
       max-height: 40px !important;
-      min-height: 0 !important;
+      min-height: 40px !important;
     }
     table tr[data-uniform-row="1"] > td,
     table tr[data-uniform-row="1"] > th {
+      height: 40px !important;
       max-height: 40px !important;
+      min-height: 40px !important;
       overflow: hidden !important;
       vertical-align: middle !important;
+      box-sizing: border-box !important;
     }
-    table tr[data-uniform-row="1"] > td:not([data-group-label-cell="1"]),
-    table tr[data-uniform-row="1"] > th:not([data-group-label-cell="1"]) {
-      height: 40px !important;
+    /* If the table is wrapped in a flex container that stretches it, neutralise it */
+    table[data-flat-table="1"] {
+      height: auto !important;
+      flex: 0 0 auto !important;
+    }
+    table[data-flat-table="1"] tbody {
+      height: auto !important;
     }
 
     /* Password gate (loads before the app) */
@@ -627,24 +622,38 @@
       }
 
       function unifyTableGroups() {
-        // Hide vertical "CARGAS LATERALES" / "TRASERAS" group-label cells
-        // (they use rowspan>1 and contain those labels) so the table looks unified.
-        var cells = document.querySelectorAll('td[rowspan]');
-        for (var i = 0; i < cells.length; i++) {
-          var c = cells[i];
-          if (c.dataset.groupLabelCell === '1') continue;
-          var txt = (c.textContent || '').toUpperCase();
-          if (txt.indexOf('CARGAS LATERALES') !== -1 ||
-              txt.indexOf('TRASERAS') !== -1 ||
-              txt.indexOf('OTROS') !== -1) {
-            c.dataset.groupLabelCell = '1';
+        // Mark every table and row so our CSS can force uniform 40px height.
+        // Also strip any inline height/min-height that React/the bundle sets
+        // (this is what lets row 3137 stretch into the yellow gap).
+        var tables = document.querySelectorAll('table');
+        for (var t = 0; t < tables.length; t++) {
+          if (tables[t].dataset.flatTable !== '1') tables[t].dataset.flatTable = '1';
+          // Neutralise any parent that forces the table to stretch with flex/height
+          var p = tables[t].parentElement;
+          for (var depth = 0; depth < 3 && p; depth++) {
+            if (p.style && (p.style.flex || p.style.height || p.style.minHeight)) {
+              p.style.flex = '0 0 auto';
+              p.style.height = 'auto';
+              p.style.minHeight = '0';
+            }
+            p = p.parentElement;
           }
         }
-        // Mark all data rows for uniform-height CSS
         var rows = document.querySelectorAll('table tr');
         for (var r = 0; r < rows.length; r++) {
-          if (rows[r].dataset.uniformRow !== '1') {
-            rows[r].dataset.uniformRow = '1';
+          var row = rows[r];
+          if (row.dataset.uniformRow !== '1') row.dataset.uniformRow = '1';
+          // Remove inline height attribute and style if present
+          if (row.hasAttribute('height')) row.removeAttribute('height');
+          if (row.style.height) row.style.height = '';
+          if (row.style.minHeight) row.style.minHeight = '';
+          // Same for the cells
+          var tds = row.children;
+          for (var k = 0; k < tds.length; k++) {
+            var td = tds[k];
+            if (td.hasAttribute('height')) td.removeAttribute('height');
+            if (td.style.height) td.style.height = '';
+            if (td.style.minHeight) td.style.minHeight = '';
           }
         }
       }
