@@ -649,20 +649,6 @@
         }
       }
 
-      function renameUrbButton() {
-        // Submenu service button: "URBANIZ." -> "URB."
-        var nodes = document.querySelectorAll('button, span, div');
-        for (var i = 0; i < nodes.length; i++) {
-          var n = nodes[i];
-          if (n.dataset.urbRenamed === '1') continue;
-          // Only text nodes that EXACTLY match "URBANIZ." (avoid replacing headers like "URBANIZACIONES")
-          if (n.children.length === 0 && n.textContent && n.textContent.trim() === 'URBANIZ.') {
-            n.textContent = 'URB.';
-            n.dataset.urbRenamed = '1';
-          }
-        }
-      }
-
       function runInjections() {
         injectRefreshButton();
         injectPartesGlow();
@@ -670,7 +656,6 @@
         autoFitEyeView();
         fixTextoEditMode();
         unifyTableGroups();
-        renameUrbButton();
       }
 
       var observer = new MutationObserver(runInjections);
