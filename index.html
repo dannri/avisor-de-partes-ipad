@@ -806,6 +806,140 @@
         return null;
       }
 
+      // Lee la fecha actual que muestra la app desde el fiber (h0 del componente Zx).
+      // Devuelve string "DD-MM-YYYY" (formato docId Firestore) o null.
+      function __lkReadFechaActual() {
+        try {
+          var sc = document.querySelector('[data-scroll-container]');
+          if (!sc) return null;
+          var fk = null;
+          var keys = Object.keys(sc);
+          for (var i = 0; i < keys.length; i++) {
+            if (keys[i].indexOf('__reactFiber$') === 0) { fk = keys[i]; break; }
+          }
+          if (!fk) return null;
+          var node = sc[fk];
+          for (var depth = 0; depth < 20; depth++) {
+            node = node && node.return;
+            if (!node) break;
+            if (typeof node.type !== 'function') continue;
+            var h0 = node.memoizedState;
+            if (!h0) continue;
+            var h1 = h0.next, h2 = h1 && h1.next, h3 = h2 && h2.next;
+            if (h3 && h3.queue && typeof h3.queue.dispatch === 'function' &&
+                (h3.memoizedState === null || h3.memoizedState === 'NOCHE' ||
+                 h3.memoizedState === 'URBANIZACIONES' || h3.memoizedState === 'TARDE') &&
+                typeof h0.memoizedState === 'string' && h0.memoizedState.indexOf('-') !== -1) {
+              return h0.memoizedState; // puede ser "YYYY-MM-DD" o "DD-MM-YYYY"
+            }
+          }
+        } catch (e) {}
+        return null;
+      }
+
+      // Copia los datos de TARDE del día anterior desde Firestore hacia NOCHE del día actual.
+      function __lkCopyTardeAyer(destino) {
+        try {
+          // Verificar candado
+          var turnoActivo = __lkReadTurnoActivo();
+          if (turnoActivo !== destino) {
+            __lkShowAlert('Para copiar a ' + destino + ', primero desbloquea su candado.');
+            return false;
+          }
+
+          // Obtener fecha actual del fiber
+          var fechaRaw = __lkReadFechaActual();
+          if (!fechaRaw) { __lkShowAlert('No se pudo leer la fecha actual.'); return false; }
+
+          // Calcular ayer. El formato puede ser YYYY-MM-DD o DD-MM-YYYY.
+          // Detectamos por longitud/posición del año.
+          var parts = fechaRaw.split('-');
+          var ayerDate;
+          if (parts[0].length === 4) {
+            // YYYY-MM-DD
+            ayerDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) - 1);
+          } else {
+            // DD-MM-YYYY
+            ayerDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]) - 1);
+          }
+          var dd = String(ayerDate.getDate()).padStart(2, '0');
+          var mm = String(ayerDate.getMonth() + 1).padStart(2, '0');
+          var yyyy = ayerDate.getFullYear();
+          var docIdAyer = 'TARDE_' + dd + '-' + mm + '-' + yyyy;
+
+          // Config Firebase (igual que en app.js)
+          var projectId = 'partes-engargados';
+          var appId = 'partes-engargados'; // artifacts/{appId}/...
+          var apiKey = 'AIzaSyAOLHPUR4mNd4Tvo90uvTSGDNTfDb0Al64';
+          var url = 'https://firestore.googleapis.com/v1/projects/' + projectId +
+            '/databases/(default)/documents/artifacts/' + appId +
+            '/public/data/servicios_diarios/' + docIdAyer + '?key=' + apiKey;
+
+          // Mostrar spinner/aviso mientras carga
+          __lkShowAlert('Cargando datos de TARDE del ' + dd + '/' + mm + '/' + yyyy + '...');
+
+          fetch(url).then(function(resp) {
+            return resp.json();
+          }).then(function(data) {
+            // Cerrar el aviso de carga
+            var alertEl = document.getElementById('__lk_alert__');
+            if (alertEl) try { document.body.removeChild(alertEl); } catch(e) {}
+
+            if (!data || !data.fields || !data.fields.registros) {
+              __lkShowAlert('No hay datos de TARDE del ' + dd + '/' + mm + '/' + yyyy + '.');
+              return;
+            }
+
+            // Parsear campos Firestore (formato Value)
+            function fsVal(v) {
+              if (!v) return null;
+              if ('stringValue' in v) return v.stringValue;
+              if ('booleanValue' in v) return v.booleanValue;
+              if ('nullValue' in v) return null;
+              if ('integerValue' in v) return parseInt(v.integerValue);
+              return null;
+            }
+
+            var registros = data.fields.registros.mapValue && data.fields.registros.mapValue.fields;
+            if (!registros) {
+              __lkShowAlert('No hay datos de TARDE del ' + dd + '/' + mm + '/' + yyyy + '.');
+              return;
+            }
+
+            // Escribir en NOCHE vía fiber de cada fila
+            var trs = document.querySelectorAll('tbody tr');
+            var count = 0;
+            var fields = ['estado', 'cargaNo', 'cargaSiTipo', 'otros'];
+            for (var i = 0; i < trs.length; i++) {
+              var props = __lkReadRowFiber(trs[i]);
+              if (!props) continue;
+              var update = props.onUpdateN;
+              if (typeof update !== 'function') continue;
+              var vid = String(props.vehiculoId);
+              var reg = registros[vid] && registros[vid].mapValue && registros[vid].mapValue.fields;
+              if (!reg) continue;
+              for (var f = 0; f < fields.length; f++) {
+                var field = fields[f];
+                var val = fsVal(reg[field]);
+                if (typeof val === 'undefined' || val === undefined)
+                  val = (field === 'cargaNo' ? false : (field === 'estado' ? null : ''));
+                try { update(props.vehiculoId, field, val); } catch(e) {}
+              }
+              count++;
+            }
+            __lkShowAlert('Copiados ' + count + ' registros de TARDE (' + dd + '/' + mm + '/' + yyyy + ') a NOCHE.');
+          }).catch(function(err) {
+            var alertEl = document.getElementById('__lk_alert__');
+            if (alertEl) try { document.body.removeChild(alertEl); } catch(e) {}
+            __lkShowAlert('Error al leer Firestore: ' + (err && err.message ? err.message : 'sin conexión'));
+          });
+
+          return true; // La copia es asíncrona
+        } catch (e) {
+          return false;
+        }
+      }
+
       // Realiza la copia turnoFuente → turnoDestino en todas las filas visibles.
       function __lkCopyTurno(fuente, destino) {
         try {
@@ -879,10 +1013,15 @@
         document.getElementById('__lk_copy_no__').onclick = close;
         document.getElementById('__lk_copy_yes__').onclick = function() {
           close();
-          var res = __lkCopyTurno(fuente, destino);
-          if (res === false) return; // Alerta ya mostrada
-          if (res === 0) __lkShowAlert('No se encontraron filas para copiar.');
-          else __lkShowAlert('Copiados ' + res + ' registros de ' + fuente + ' a ' + destino + '.');
+          if (fuente === 'TARDE' && destino === 'NOCHE') {
+            // Copia asíncrona desde Firestore (día anterior)
+            __lkCopyTardeAyer(destino);
+          } else {
+            var res = __lkCopyTurno(fuente, destino);
+            if (res === false) return;
+            if (res === 0) __lkShowAlert('No se encontraron filas para copiar.');
+            else __lkShowAlert('Copiados ' + res + ' registros de ' + fuente + ' a ' + destino + '.');
+          }
         };
       }
 
