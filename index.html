@@ -1619,6 +1619,37 @@
         }
       }
 
+      // --- Gestión de scroll vertical para iPad PWA ---
+      // Por defecto el iPad es una PWA con viewport fijo y NO debería necesitar
+      // scroll. Pero si una sub-pantalla genera contenido más alto que el viewport,
+      // queremos que se pueda hacer scroll en lugar de quedar cortado.
+      // En el MENÚ PRINCIPAL: nada de scroll (overflow:hidden).
+      // En sub-pantalla: permitir scroll vertical si hace falta.
+      function __setStyleIfDiff(el, prop, val) {
+        if (!el) return;
+        if (el.style[prop] !== val) el.style[prop] = val;
+      }
+      function gestionarScrolliPad() {
+        try {
+          var menuBtn = findMenuBackButton();
+          var enMenuPrincipal = !menuBtn;
+          if (enMenuPrincipal) {
+            __setStyleIfDiff(document.documentElement, 'overflowY', 'hidden');
+            __setStyleIfDiff(document.documentElement, 'overflowX', 'hidden');
+            __setStyleIfDiff(document.body, 'overflowY', 'hidden');
+            __setStyleIfDiff(document.body, 'overflowX', 'hidden');
+            return;
+          }
+          // Sub-pantalla: permitir scroll vertical en html y body
+          __setStyleIfDiff(document.documentElement, 'overflowY', 'auto');
+          __setStyleIfDiff(document.documentElement, 'overflowX', 'hidden');
+          __setStyleIfDiff(document.body, 'overflowY', 'auto');
+          __setStyleIfDiff(document.body, 'overflowX', 'hidden');
+          // -webkit-overflow-scrolling: touch para iOS momentum scroll
+          __setStyleIfDiff(document.body, 'webkitOverflowScrolling', 'touch');
+        } catch (e) {}
+      }
+
       function runInjections() {
         injectRefreshButton();
         injectPartesGlow();
@@ -1628,6 +1659,7 @@
         try { injectEstadoLocks(); } catch(e) {}
         try { injectContadores(); } catch(e) {}
         try { tintarFilasGris(); } catch(e) {}
+        try { gestionarScrolliPad(); } catch(e) {}
         unifyTableGroups();
       }
 
