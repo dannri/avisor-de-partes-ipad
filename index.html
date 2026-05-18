@@ -837,7 +837,36 @@
         return null;
       }
 
-      // Copia los datos de TARDE del día anterior desde Firestore hacia NOCHE del día actual.
+      // Lee el array de servicios cargados en memoria desde el estado React del componente raíz (a1).
+      // El componente a1 tiene: hook0=null, hook1=null, hook2=Array(servicios), hook3=Array(averias)...
+      // Cada servicio: { id, turno, fechaStr (DD/MM/YYYY), registros: {vehiculoId: {estado,cargaNo,...}} }
+      function __lkReadServicios() {
+        try {
+          var root = document.getElementById('root');
+          if (!root) return null;
+          var fk = null;
+          var keys = Object.keys(root);
+          for (var i = 0; i < keys.length; i++) {
+            if (keys[i].indexOf('__reactFiber$') === 0) { fk = keys[i]; break; }
+          }
+          if (!fk) return null;
+          var node = root[fk];
+          for (var depth = 0; depth < 40; depth++) {
+            if (!node) break;
+            var ms = node.memoizedState;
+            if (ms && ms.next && ms.next.next) {
+              var h2 = ms.next.next.memoizedState;
+              if (Array.isArray(h2) && h2.length > 0 && h2[0] && typeof h2[0].turno === 'string' && typeof h2[0].fechaStr === 'string') {
+                return h2;
+              }
+            }
+            node = node.return;
+          }
+        } catch (e) {}
+        return null;
+      }
+
+      // Copia los datos de TARDE del día anterior desde el estado React hacia NOCHE del día actual.
       function __lkCopyTardeAyer(destino) {
         try {
           // Verificar candado
@@ -847,94 +876,65 @@
             return false;
           }
 
-          // Obtener fecha actual del fiber
+          // Obtener fecha actual del fiber (formato YYYY-MM-DD)
           var fechaRaw = __lkReadFechaActual();
           if (!fechaRaw) { __lkShowAlert('No se pudo leer la fecha actual.'); return false; }
 
-          // Calcular ayer. El formato puede ser YYYY-MM-DD o DD-MM-YYYY.
-          // Detectamos por longitud/posición del año.
+          // Calcular fechaStr de ayer en formato DD/MM/YYYY (igual que usa la app)
           var parts = fechaRaw.split('-');
           var ayerDate;
           if (parts[0].length === 4) {
-            // YYYY-MM-DD
             ayerDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) - 1);
           } else {
-            // DD-MM-YYYY
             ayerDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]) - 1);
           }
           var dd = String(ayerDate.getDate()).padStart(2, '0');
           var mm = String(ayerDate.getMonth() + 1).padStart(2, '0');
           var yyyy = ayerDate.getFullYear();
-          var docIdAyer = 'TARDE_' + dd + '-' + mm + '-' + yyyy;
+          var fechaStrAyer1 = dd + '/' + mm + '/' + yyyy;
+          var fechaStrAyer2 = String(ayerDate.getDate()) + '/' + String(ayerDate.getMonth()+1) + '/' + yyyy;
 
-          // Config Firebase (igual que en app.js)
-          var projectId = 'partes-engargados';
-          var appId = 'partes-engargados'; // artifacts/{appId}/...
-          var apiKey = 'AIzaSyAOLHPUR4mNd4Tvo90uvTSGDNTfDb0Al64';
-          var url = 'https://firestore.googleapis.com/v1/projects/' + projectId +
-            '/databases/(default)/documents/artifacts/' + appId +
-            '/public/data/servicios_diarios/' + docIdAyer + '?key=' + apiKey;
+          // Leer array de servicios del estado React
+          var servicios = __lkReadServicios();
+          if (!servicios) { __lkShowAlert('No se pudo leer el estado de la app.'); return false; }
 
-          // Mostrar spinner/aviso mientras carga
-          __lkShowAlert('Cargando datos de TARDE del ' + dd + '/' + mm + '/' + yyyy + '...');
-
-          fetch(url).then(function(resp) {
-            return resp.json();
-          }).then(function(data) {
-            // Cerrar el aviso de carga
-            var alertEl = document.getElementById('__lk_alert__');
-            if (alertEl) try { document.body.removeChild(alertEl); } catch(e) {}
-
-            if (!data || !data.fields || !data.fields.registros) {
-              __lkShowAlert('No hay datos de TARDE del ' + dd + '/' + mm + '/' + yyyy + '.');
-              return;
+          // Buscar el documento TARDE del día anterior
+          var docTarde = null;
+          for (var i = 0; i < servicios.length; i++) {
+            var sv = servicios[i];
+            if (sv.turno === 'TARDE' && (sv.fechaStr === fechaStrAyer1 || sv.fechaStr === fechaStrAyer2)) {
+              docTarde = sv;
+              break;
             }
+          }
 
-            // Parsear campos Firestore (formato Value)
-            function fsVal(v) {
-              if (!v) return null;
-              if ('stringValue' in v) return v.stringValue;
-              if ('booleanValue' in v) return v.booleanValue;
-              if ('nullValue' in v) return null;
-              if ('integerValue' in v) return parseInt(v.integerValue);
-              return null;
+          if (!docTarde || !docTarde.registros) {
+            __lkShowAlert('No hay datos de TARDE del ' + dd + '/' + mm + '/' + yyyy + '.');
+            return false;
+          }
+
+          // Escribir en NOCHE vía fiber de cada fila
+          var trs = document.querySelectorAll('tbody tr');
+          var count = 0;
+          var fields = ['estado', 'cargaNo', 'cargaSiTipo', 'otros'];
+          for (var i = 0; i < trs.length; i++) {
+            var props = __lkReadRowFiber(trs[i]);
+            if (!props) continue;
+            var update = props.onUpdateN;
+            if (typeof update !== 'function') continue;
+            var vid = String(props.vehiculoId);
+            var reg = docTarde.registros[vid];
+            if (!reg) continue;
+            for (var f = 0; f < fields.length; f++) {
+              var field = fields[f];
+              var val = reg[field];
+              if (typeof val === 'undefined') val = (field === 'cargaNo' ? false : (field === 'estado' ? null : ''));
+              try { update(props.vehiculoId, field, val); } catch(e) {}
             }
-
-            var registros = data.fields.registros.mapValue && data.fields.registros.mapValue.fields;
-            if (!registros) {
-              __lkShowAlert('No hay datos de TARDE del ' + dd + '/' + mm + '/' + yyyy + '.');
-              return;
-            }
-
-            // Escribir en NOCHE vía fiber de cada fila
-            var trs = document.querySelectorAll('tbody tr');
-            var count = 0;
-            var fields = ['estado', 'cargaNo', 'cargaSiTipo', 'otros'];
-            for (var i = 0; i < trs.length; i++) {
-              var props = __lkReadRowFiber(trs[i]);
-              if (!props) continue;
-              var update = props.onUpdateN;
-              if (typeof update !== 'function') continue;
-              var vid = String(props.vehiculoId);
-              var reg = registros[vid] && registros[vid].mapValue && registros[vid].mapValue.fields;
-              if (!reg) continue;
-              for (var f = 0; f < fields.length; f++) {
-                var field = fields[f];
-                var val = fsVal(reg[field]);
-                if (typeof val === 'undefined' || val === undefined)
-                  val = (field === 'cargaNo' ? false : (field === 'estado' ? null : ''));
-                try { update(props.vehiculoId, field, val); } catch(e) {}
-              }
-              count++;
-            }
-            __lkShowAlert('Copiados ' + count + ' registros de TARDE (' + dd + '/' + mm + '/' + yyyy + ') a NOCHE.');
-          }).catch(function(err) {
-            var alertEl = document.getElementById('__lk_alert__');
-            if (alertEl) try { document.body.removeChild(alertEl); } catch(e) {}
-            __lkShowAlert('Error al leer Firestore: ' + (err && err.message ? err.message : 'sin conexión'));
-          });
-
-          return true; // La copia es asíncrona
+            count++;
+          }
+          __lkShowAlert('Copiados ' + count + ' registros de TARDE (' + dd + '/' + mm + '/' + yyyy + ') a NOCHE.');
+          return count;
         } catch (e) {
           return false;
         }
