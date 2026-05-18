@@ -819,8 +819,8 @@
           var trs = document.querySelectorAll('tbody tr');
           var count = 0;
           var fields = ['estado', 'cargaNo', 'cargaSiTipo', 'otros'];
-          var srcKey = fuente === 'NOCHE' ? 'nDatos' : 'uDatos';
-          var updKey = destino === 'URBANIZACIONES' ? 'onUpdateU' : 'onUpdateT';
+          var srcKey = fuente === 'NOCHE' ? 'nDatos' : (fuente === 'URBANIZACIONES' ? 'uDatos' : 'tDatos');
+          var updKey = destino === 'NOCHE' ? 'onUpdateN' : (destino === 'URBANIZACIONES' ? 'onUpdateU' : 'onUpdateT');
 
           for (var i = 0; i < trs.length; i++) {
             var props = __lkReadRowFiber(trs[i]);
@@ -1025,13 +1025,13 @@
             th.appendChild(btn);
           }
 
-          // Botón de copia solo en URB y TARDE
-          if (turno !== 'NOCHE' && !th.querySelector('[data-copy-btn]')) {
+          // Botón de copia en los tres turnos (NOCHE copia desde TARDE del día anterior)
+          if (!th.querySelector('[data-copy-btn]')) {
             var cbtn = document.createElement('button');
             cbtn.setAttribute('data-copy-btn', turno);
             cbtn.type = 'button';
             __lkStyleCopyBtn(cbtn);
-            var fuente = (turno === 'URBANIZACIONES') ? 'NOCHE' : 'URBANIZACIONES';
+            var fuente = (turno === 'NOCHE') ? 'TARDE' : (turno === 'URBANIZACIONES') ? 'NOCHE' : 'URBANIZACIONES';
             cbtn.title = 'Copiar datos de ' + fuente;
             (function(f, d) {
               cbtn.onclick = function(e) {
