@@ -1883,86 +1883,118 @@
         'INVICTAS CITROEN DFSK'
       ];
 
-      function __avGetDispatch(btn) {
+      // Busca el botón "TODOS" del dropdown del filtro de categorías (solo visible cuando dropdown está abierto)
+      function __avFindTodosBtn() {
+        var buttons = document.querySelectorAll('button');
+        for (var i = 0; i < buttons.length; i++) {
+          if ((buttons[i].textContent || '').trim() === 'TODOS') {
+            var parent = buttons[i].parentNode;
+            if (parent && parent.children.length > 3) return buttons[i];
+          }
+        }
+        return null;
+      }
+
+      // Busca el botón principal del filtro "FILTRAR CATEGORÍAS" (siempre visible cuando se está en AVERÍAS)
+      function __avFindMainFilterBtn() {
+        var buttons = document.querySelectorAll('button');
+        for (var i = 0; i < buttons.length; i++) {
+          var txt = (buttons[i].textContent || '');
+          if (txt.indexOf('FILTRAR CATEGOR') !== -1) return buttons[i];
+        }
+        return null;
+      }
+
+      // Obtiene el dispatch del useState W (Set de categorías) del fiber del nodo dado.
+      function __avGetDispatch(node) {
         try {
+          if (!node) return null;
           var fk = null;
-          var keys = Object.keys(btn);
+          var keys = Object.keys(node);
           for (var i = 0; i < keys.length; i++) {
             if (keys[i].indexOf('__reactFiber$') === 0) { fk = keys[i]; break; }
           }
           if (!fk) return null;
-          var node = btn[fk];
-          for (var depth = 0; depth < 20; depth++) {
-            if (!node) break;
-            var ms = node.memoizedState;
+          var fiber = node[fk];
+          for (var depth = 0; depth < 25; depth++) {
+            if (!fiber) break;
+            var ms = fiber.memoizedState;
             var h = ms;
-            for (var hi = 0; hi < 15 && h; hi++) {
+            for (var hi = 0; hi < 20 && h; hi++) {
               if (h.memoizedState instanceof Set) {
                 var q = h.queue;
                 if (q && typeof q.dispatch === 'function') return q.dispatch;
               }
               h = h.next;
             }
-            node = node.return;
+            fiber = fiber.return;
           }
         } catch(e) {}
         return null;
       }
 
+      // Despacha un nuevo Set buscando el dispatch en vivo cada vez (no cachea referencias).
+      function __avDispatchSet(newSet) {
+        var mainBtn = __avFindMainFilterBtn();
+        if (mainBtn) {
+          var d = __avGetDispatch(mainBtn);
+          if (d) { d(newSet); return true; }
+        }
+        var todosBtn = __avFindTodosBtn();
+        if (todosBtn) {
+          var d2 = __avGetDispatch(todosBtn);
+          if (d2) { d2(newSet); return true; }
+        }
+        return false;
+      }
+
       function injectAveriasFilter() {
-        var buttons = document.querySelectorAll('button');
-        var todosBtn = null;
-        for (var i = 0; i < buttons.length; i++) {
-          if ((buttons[i].textContent || '').trim() === 'TODOS') {
-            var parent = buttons[i].parentNode;
-            if (parent && parent.children.length > 3) { todosBtn = buttons[i]; break; }
+        // ── 1. Botón ★ preset SIEMPRE visible (junto al contador del botón principal) ──
+        var mainBtn = __avFindMainFilterBtn();
+        if (mainBtn && !mainBtn.parentNode.querySelector('[data-av-preset]')) {
+          var spans = mainBtn.querySelectorAll('span');
+          var contadorSpan = null;
+          for (var s = 0; s < spans.length; s++) {
+            var c = (spans[s].className || '');
+            if (c.indexOf('bg-blue') !== -1 || c.indexOf('rounded-full') !== -1) {
+              contadorSpan = spans[s];
+              break;
+            }
+          }
+          if (!contadorSpan && spans.length >= 2) contadorSpan = spans[spans.length - 1];
+
+          if (contadorSpan) {
+            var presetBtn = document.createElement('button');
+            presetBtn.type = 'button';
+            presetBtn.setAttribute('data-av-preset', '1');
+            presetBtn.title = 'Seleccionar favoritos (Cargas, Lava y cubas, Hidros, Ivecos, Invictas)';
+            presetBtn.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;' +
+              'margin-right:6px;padding:3px 10px;border-radius:9999px;border:2px solid #2563eb;' +
+              'background:#dbeafe;color:#1d4ed8;cursor:pointer;font-size:13px;font-weight:bold;' +
+              'white-space:nowrap;line-height:1;vertical-align:middle;height:24px;';
+            presetBtn.textContent = '★';
+            contadorSpan.parentNode.insertBefore(presetBtn, contadorSpan);
+            presetBtn.onclick = function(e) {
+              e.preventDefault();
+              e.stopPropagation();
+              __avDispatchSet(new Set(__PRESET_CATS));
+            };
           }
         }
-        if (!todosBtn) return;
 
-        if (!todosBtn.parentNode.querySelector('[data-av-ninguno]')) {
+        // ── 2. Botón NINGUNO justo después de TODOS (solo cuando dropdown está abierto) ──
+        var todosBtn = __avFindTodosBtn();
+        if (todosBtn && !todosBtn.parentNode.querySelector('[data-av-ninguno]')) {
           var ningunoBtn = document.createElement('button');
           ningunoBtn.type = 'button';
           ningunoBtn.setAttribute('data-av-ninguno', '1');
-          ningunoBtn.style.cssText = 'width:100%;text-align:left;padding:10px 16px;border-radius:8px;font-size:12px;font-weight:bold;transition:all 0.15s;background:#f3f4f6;color:#374151;border:none;cursor:pointer;';
+          ningunoBtn.className = todosBtn.className;
           ningunoBtn.textContent = 'NINGUNO';
           todosBtn.insertAdjacentElement('afterend', ningunoBtn);
           ningunoBtn.onclick = function(e) {
-            e.preventDefault(); e.stopPropagation();
-            var dispatch = __avGetDispatch(ningunoBtn);
-            if (dispatch) dispatch(new Set());
-          };
-        }
-
-        var spans = document.querySelectorAll('span');
-        var contadorSpan = null;
-        for (var i = 0; i < spans.length; i++) {
-          var txt = (spans[i].textContent || '');
-          if (txt.indexOf('SELEC.') !== -1 || txt.indexOf('TODAS') !== -1) {
-            var anc = spans[i].parentNode;
-            var found = false;
-            for (var d = 0; d < 5 && anc; d++) {
-              if ((anc.textContent || '').indexOf('FILTRAR') !== -1) { found = true; break; }
-              anc = anc.parentNode;
-            }
-            if (found) { contadorSpan = spans[i]; break; }
-          }
-        }
-        if (contadorSpan && !contadorSpan.parentNode.querySelector('[data-av-preset]')) {
-          var presetBtn = document.createElement('button');
-          presetBtn.type = 'button';
-          presetBtn.setAttribute('data-av-preset', '1');
-          presetBtn.title = 'Seleccionar: Cargas laterales, Cargas traseras, Lava y cubas, Hidros, Ivecos, Invictas';
-          presetBtn.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;' +
-            'margin-left:6px;padding:3px 10px;border-radius:9999px;border:2px solid #2563eb;' +
-            'background:#dbeafe;color:#1d4ed8;cursor:pointer;font-size:11px;font-weight:bold;' +
-            'white-space:nowrap;line-height:1.2;vertical-align:middle;';
-          presetBtn.textContent = '★';
-          contadorSpan.parentNode.insertBefore(presetBtn, contadorSpan);
-          presetBtn.onclick = function(e) {
-            e.preventDefault(); e.stopPropagation();
-            var dispatch = __avGetDispatch(todosBtn);
-            if (dispatch) dispatch(new Set(__PRESET_CATS));
+            e.preventDefault();
+            e.stopPropagation();
+            __avDispatchSet(new Set());
           };
         }
       }
