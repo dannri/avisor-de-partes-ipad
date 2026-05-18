@@ -837,28 +837,30 @@
         return null;
       }
 
-      // Lee el array de servicios cargados en memoria desde el estado React del componente raíz (a1).
-      // El componente a1 tiene: hook0=null, hook1=null, hook2=Array(servicios), hook3=Array(averias)...
-      // Cada servicio: { id, turno, fechaStr (DD/MM/YYYY), registros: {vehiculoId: {estado,cargaNo,...}} }
+      // Lee el array de servicios cargados en memoria subiendo por el fiber desde [data-scroll-container].
+      // Busca cualquier nodo cuyo estado contenga un Array con elementos {turno, fechaStr}.
       function __lkReadServicios() {
         try {
-          var root = document.getElementById('root');
-          if (!root) return null;
+          var sc = document.querySelector('[data-scroll-container]');
+          if (!sc) return null;
           var fk = null;
-          var keys = Object.keys(root);
+          var keys = Object.keys(sc);
           for (var i = 0; i < keys.length; i++) {
             if (keys[i].indexOf('__reactFiber$') === 0) { fk = keys[i]; break; }
           }
           if (!fk) return null;
-          var node = root[fk];
-          for (var depth = 0; depth < 40; depth++) {
+          var node = sc[fk];
+          for (var depth = 0; depth < 60; depth++) {
             if (!node) break;
             var ms = node.memoizedState;
-            if (ms && ms.next && ms.next.next) {
-              var h2 = ms.next.next.memoizedState;
-              if (Array.isArray(h2) && h2.length > 0 && h2[0] && typeof h2[0].turno === 'string' && typeof h2[0].fechaStr === 'string') {
-                return h2;
+            // Recorrer todos los hooks del nodo buscando uno que sea Array de servicios
+            var h = ms;
+            for (var hi = 0; hi < 20 && h; hi++) {
+              var v = h.memoizedState;
+              if (Array.isArray(v) && v.length > 0 && v[0] && typeof v[0].turno === 'string' && typeof v[0].fechaStr === 'string') {
+                return v;
               }
+              h = h.next;
             }
             node = node.return;
           }
