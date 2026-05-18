@@ -1791,6 +1791,182 @@
         } catch (e) {}
       }
 
+      // ── Navegación de fecha ◀ / ▶ ────────────────────────────────────────────
+      function injectDateNav() {
+        var inputs = document.querySelectorAll('input[type="date"]');
+        for (var ii = 0; ii < inputs.length; ii++) {
+          var inp = inputs[ii];
+          var container = inp.parentNode;
+          if (!container) continue;
+          var label = container.querySelector('label');
+          if (!label || (label.textContent || '').trim().toUpperCase() !== 'FECHA:') continue;
+          if (container.querySelector('[data-date-nav]')) continue;
+
+          var btnStyle = 'display:inline-flex;align-items:center;justify-content:center;' +
+            'width:26px;height:26px;border-radius:50%;border:2px solid #6b7280;' +
+            'background:#f3f4f6;color:#374151;cursor:pointer;font-size:14px;font-weight:bold;' +
+            'line-height:1;padding:0;flex-shrink:0;transition:background 0.15s;';
+
+          var btnPrev = document.createElement('button');
+          btnPrev.type = 'button';
+          btnPrev.setAttribute('data-date-nav', 'prev');
+          btnPrev.style.cssText = btnStyle;
+          btnPrev.innerHTML = '&#9664;';
+          btnPrev.title = 'Día anterior';
+
+          var btnNext = document.createElement('button');
+          btnNext.type = 'button';
+          btnNext.setAttribute('data-date-nav', 'next');
+          btnNext.style.cssText = btnStyle;
+          btnNext.innerHTML = '&#9654;';
+          btnNext.title = 'Día siguiente';
+
+          container.insertBefore(btnPrev, inp);
+          inp.insertAdjacentElement('afterend', btnNext);
+
+          (function(inputEl) {
+            function changeDate(delta) {
+              try {
+                var val = inputEl.value;
+                if (!val) return;
+                var d = new Date(val + 'T12:00:00');
+                d.setDate(d.getDate() + delta);
+                var yyyy = d.getFullYear();
+                var mm = String(d.getMonth() + 1).padStart(2, '0');
+                var dd = String(d.getDate()).padStart(2, '0');
+                var newVal = yyyy + '-' + mm + '-' + dd;
+                var fk = null;
+                var keys = Object.keys(inputEl);
+                for (var i = 0; i < keys.length; i++) {
+                  if (keys[i].indexOf('__reactFiber$') === 0) { fk = keys[i]; break; }
+                }
+                if (!fk) {
+                  var parent = inputEl.parentNode;
+                  if (parent) {
+                    keys = Object.keys(parent);
+                    for (var i = 0; i < keys.length; i++) {
+                      if (keys[i].indexOf('__reactFiber$') === 0) { fk = keys[i]; break; }
+                    }
+                    if (fk) inputEl = parent;
+                  }
+                }
+                if (!fk) return;
+                var node = inputEl[fk];
+                for (var depth = 0; depth < 25; depth++) {
+                  if (!node) break;
+                  var ms = node.memoizedState;
+                  if (ms && typeof ms.memoizedState === 'string' && ms.memoizedState.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                    var q = ms.queue;
+                    if (q && typeof q.dispatch === 'function') { q.dispatch(newVal); return; }
+                  }
+                  node = node.return;
+                }
+              } catch(e) {}
+            }
+            inputEl.parentNode.querySelector('[data-date-nav="prev"]').onclick = function(e) {
+              e.preventDefault(); e.stopPropagation(); changeDate(-1);
+            };
+            inputEl.parentNode.querySelector('[data-date-nav="next"]').onclick = function(e) {
+              e.preventDefault(); e.stopPropagation(); changeDate(+1);
+            };
+          })(inp);
+        }
+      }
+
+      // ── Filtro averías: NINGUNO + botón preset ──────────────────────────────
+      var __PRESET_CATS = [
+        'CARGAS LATERALES',
+        'CARGAS TRASERAS Y C. TRACTORAS',
+        'EQUIPOS LAVA Y CUBAS',
+        'EQUIPOS HIDROS',
+        'IVECOS DAILY Y MAXUX',
+        'INVICTAS CITROEN DFSK'
+      ];
+
+      function __avGetDispatch(btn) {
+        try {
+          var fk = null;
+          var keys = Object.keys(btn);
+          for (var i = 0; i < keys.length; i++) {
+            if (keys[i].indexOf('__reactFiber$') === 0) { fk = keys[i]; break; }
+          }
+          if (!fk) return null;
+          var node = btn[fk];
+          for (var depth = 0; depth < 20; depth++) {
+            if (!node) break;
+            var ms = node.memoizedState;
+            var h = ms;
+            for (var hi = 0; hi < 15 && h; hi++) {
+              if (h.memoizedState instanceof Set) {
+                var q = h.queue;
+                if (q && typeof q.dispatch === 'function') return q.dispatch;
+              }
+              h = h.next;
+            }
+            node = node.return;
+          }
+        } catch(e) {}
+        return null;
+      }
+
+      function injectAveriasFilter() {
+        var buttons = document.querySelectorAll('button');
+        var todosBtn = null;
+        for (var i = 0; i < buttons.length; i++) {
+          if ((buttons[i].textContent || '').trim() === 'TODOS') {
+            var parent = buttons[i].parentNode;
+            if (parent && parent.children.length > 3) { todosBtn = buttons[i]; break; }
+          }
+        }
+        if (!todosBtn) return;
+
+        if (!todosBtn.parentNode.querySelector('[data-av-ninguno]')) {
+          var ningunoBtn = document.createElement('button');
+          ningunoBtn.type = 'button';
+          ningunoBtn.setAttribute('data-av-ninguno', '1');
+          ningunoBtn.style.cssText = 'width:100%;text-align:left;padding:10px 16px;border-radius:8px;font-size:12px;font-weight:bold;transition:all 0.15s;background:#f3f4f6;color:#374151;border:none;cursor:pointer;';
+          ningunoBtn.textContent = 'NINGUNO';
+          todosBtn.insertAdjacentElement('afterend', ningunoBtn);
+          ningunoBtn.onclick = function(e) {
+            e.preventDefault(); e.stopPropagation();
+            var dispatch = __avGetDispatch(ningunoBtn);
+            if (dispatch) dispatch(new Set());
+          };
+        }
+
+        var spans = document.querySelectorAll('span');
+        var contadorSpan = null;
+        for (var i = 0; i < spans.length; i++) {
+          var txt = (spans[i].textContent || '');
+          if (txt.indexOf('SELEC.') !== -1 || txt.indexOf('TODAS') !== -1) {
+            var anc = spans[i].parentNode;
+            var found = false;
+            for (var d = 0; d < 5 && anc; d++) {
+              if ((anc.textContent || '').indexOf('FILTRAR') !== -1) { found = true; break; }
+              anc = anc.parentNode;
+            }
+            if (found) { contadorSpan = spans[i]; break; }
+          }
+        }
+        if (contadorSpan && !contadorSpan.parentNode.querySelector('[data-av-preset]')) {
+          var presetBtn = document.createElement('button');
+          presetBtn.type = 'button';
+          presetBtn.setAttribute('data-av-preset', '1');
+          presetBtn.title = 'Seleccionar: Cargas laterales, Cargas traseras, Lava y cubas, Hidros, Ivecos, Invictas';
+          presetBtn.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;' +
+            'margin-left:6px;padding:3px 10px;border-radius:9999px;border:2px solid #2563eb;' +
+            'background:#dbeafe;color:#1d4ed8;cursor:pointer;font-size:11px;font-weight:bold;' +
+            'white-space:nowrap;line-height:1.2;vertical-align:middle;';
+          presetBtn.textContent = '★';
+          contadorSpan.parentNode.insertBefore(presetBtn, contadorSpan);
+          presetBtn.onclick = function(e) {
+            e.preventDefault(); e.stopPropagation();
+            var dispatch = __avGetDispatch(todosBtn);
+            if (dispatch) dispatch(new Set(__PRESET_CATS));
+          };
+        }
+      }
+
       function runInjections() {
         injectRefreshButton();
         injectPartesGlow();
@@ -1801,6 +1977,8 @@
         try { injectContadores(); } catch(e) {}
         try { tintarFilasGris(); } catch(e) {}
         try { gestionarScrolliPad(); } catch(e) {}
+        try { injectDateNav(); } catch(e) {}
+        try { injectAveriasFilter(); } catch(e) {}
         unifyTableGroups();
       }
 
