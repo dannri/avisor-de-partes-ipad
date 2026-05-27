@@ -1538,9 +1538,12 @@
         for (var i = 0; i < ths.length; i++) {
           if (ths[i].colSpan < 5) continue;
           var raw = (ths[i].textContent || '').replace(/[^A-ZÁÉÍÓÚÜÑ]/g, '').toUpperCase();
-          if (raw === 'NOCHE') secciones.NOCHE = ths[i];
-          else if (raw === 'URBANIZACIONES') secciones.URBANIZACIONES = ths[i];
-          else if (raw === 'TARDE') secciones.TARDE = ths[i];
+          // endsWith para que también case "SERVICIONOCHE" en pantalla SERVICIO NOCHE,
+          // "SERVICIOURBANIZACIONES" en SERVICIO URB, etc. y no solo el "NOCHE" puro
+          // de ESTADO COMPLETO.
+          if (raw.endsWith('NOCHE')) secciones.NOCHE = ths[i];
+          else if (raw.endsWith('URBANIZACIONES')) secciones.URBANIZACIONES = ths[i];
+          else if (raw.endsWith('TARDE')) secciones.TARDE = ths[i];
         }
         var turnosPresentes = [];
         if (secciones.NOCHE) turnosPresentes.push('NOCHE');
