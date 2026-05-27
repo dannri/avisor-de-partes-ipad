@@ -942,6 +942,81 @@
         }
       }
 
+      // Copia SOLO los averiados (estado === 'A') de TARDE del día anterior a NOCHE.
+      function __lkCopyAveriadosAyer() {
+        try {
+          var destino = 'NOCHE';
+          var turnoActivo = __lkReadTurnoActivo();
+          if (turnoActivo !== destino) {
+            __lkShowAlert('Para copiar a NOCHE, primero desbloquea su candado.');
+            return false;
+          }
+
+          var fechaRaw = __lkReadFechaActual();
+          if (!fechaRaw) { __lkShowAlert('No se pudo leer la fecha actual.'); return false; }
+
+          var parts = fechaRaw.split('-');
+          var ayerDate;
+          if (parts[0].length === 4) {
+            ayerDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) - 1);
+          } else {
+            ayerDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]) - 1);
+          }
+          var dd = String(ayerDate.getDate()).padStart(2, '0');
+          var mm = String(ayerDate.getMonth() + 1).padStart(2, '0');
+          var yyyy = ayerDate.getFullYear();
+          var fechaStrAyer1 = dd + '/' + mm + '/' + yyyy;
+          var fechaStrAyer2 = String(ayerDate.getDate()) + '/' + String(ayerDate.getMonth()+1) + '/' + yyyy;
+
+          var servicios = __lkReadServicios();
+          if (!servicios) { __lkShowAlert('No se pudo leer el estado de la app.'); return false; }
+
+          var docTarde = null;
+          for (var i = 0; i < servicios.length; i++) {
+            var sv = servicios[i];
+            if (sv.turno === 'TARDE' && (sv.fechaStr === fechaStrAyer1 || sv.fechaStr === fechaStrAyer2)) {
+              docTarde = sv;
+              break;
+            }
+          }
+
+          if (!docTarde || !docTarde.registros) {
+            __lkShowAlert('No hay datos de TARDE del ' + dd + '/' + mm + '/' + yyyy + '.');
+            return false;
+          }
+
+          var trs = document.querySelectorAll('tbody tr');
+          var count = 0;
+          var fields = ['estado', 'cargaNo', 'cargaSiTipo', 'otros'];
+          for (var i = 0; i < trs.length; i++) {
+            var props = __lkReadRowFiber(trs[i]);
+            if (!props) continue;
+            var update = props.onUpdateN;
+            if (typeof update !== 'function') continue;
+            var vid = String(props.vehiculoId);
+            var reg = docTarde.registros[vid];
+            if (!reg) continue;
+            // Solo filas averiadas en la TARDE de ayer
+            if (reg.estado !== 'A') continue;
+            for (var f = 0; f < fields.length; f++) {
+              var field = fields[f];
+              var val = reg[field];
+              if (typeof val === 'undefined') val = (field === 'cargaNo' ? false : (field === 'estado' ? null : ''));
+              try { update(props.vehiculoId, field, val); } catch(e) {}
+            }
+            count++;
+          }
+          if (count === 0) {
+            __lkShowAlert('No se encontraron averiados en TARDE del ' + dd + '/' + mm + '/' + yyyy + '.');
+          } else {
+            __lkShowAlert('Copiados ' + count + ' averiados de TARDE (' + dd + '/' + mm + '/' + yyyy + ') a NOCHE.');
+          }
+          return count;
+        } catch (e) {
+          return false;
+        }
+      }
+
       // Realiza la copia turnoFuente → turnoDestino en todas las filas visibles.
       function __lkCopyTurno(fuente, destino) {
         try {
@@ -1030,6 +1105,35 @@
       function __lkStyleCopyBtn(btn) {
         btn.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;margin-left:6px;padding:5px 12px;border-radius:9999px;border:2px solid #3b82f6;background:#dbeafe;color:#1d4ed8;cursor:pointer;vertical-align:middle;line-height:0;transition:all 0.15s;';
         btn.innerHTML = __SVG_COPY;
+      }
+
+      // Botón naranja "copia averiados del día anterior" (solo para NOCHE)
+      function __lkStyleCopyAvBtn(btn) {
+        btn.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;margin-left:6px;padding:5px 12px;border-radius:9999px;border:2px solid #f97316;background:#ffedd5;color:#c2410c;cursor:pointer;vertical-align:middle;line-height:0;transition:all 0.15s;gap:2px;';
+        btn.innerHTML = __SVG_COPY + '<span style="font-size:11px;font-weight:900;line-height:1;letter-spacing:-0.5px">A</span>';
+      }
+
+      function __lkShowCopyAvConfirm() {
+        var existing = document.getElementById('__lk_copyav_modal__');
+        if (existing) existing.parentNode.removeChild(existing);
+        var modal = document.createElement('div');
+        modal.id = '__lk_copyav_modal__';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);';
+        modal.innerHTML =
+          '<div style="background:#fff;border-radius:16px;padding:28px 24px;max-width:400px;width:90%;box-shadow:0 25px 50px rgba(0,0,0,0.3);text-align:center">' +
+          '<h3 style="font-size:18px;font-weight:bold;text-transform:uppercase;letter-spacing:0.08em;margin:0 0 14px;color:#c2410c">COPIAR AVERIADOS</h3>' +
+          '<p style="font-size:13px;color:#4b5563;margin:0 0 20px;line-height:1.4">¿Desea copiar <b style="color:#c2410c">SOLO los averiados</b> de<br/><b style="color:#1f2937">TARDE del día anterior</b> a <b style="color:#1f2937">NOCHE</b>?</p>' +
+          '<div style="display:flex;gap:12px">' +
+          '<button id="__lk_copyav_no__" type="button" style="flex:1;background:#fee2e2;border:2px solid #ef4444;color:#dc2626;border-radius:10px;padding:14px;font-weight:bold;cursor:pointer;font-size:18px">✕</button>' +
+          '<button id="__lk_copyav_yes__" type="button" style="flex:1;background:#dcfce7;border:2px solid #22c55e;color:#15803d;border-radius:10px;padding:14px;font-weight:bold;cursor:pointer;font-size:18px">✓</button>' +
+          '</div></div>';
+        document.body.appendChild(modal);
+        function close() { try { document.body.removeChild(modal); } catch (e) {} }
+        document.getElementById('__lk_copyav_no__').onclick = close;
+        document.getElementById('__lk_copyav_yes__').onclick = function() {
+          close();
+          __lkCopyAveriadosAyer();
+        };
       }
 
       function __lkStyleTrashBtn(btn) {
@@ -1182,6 +1286,21 @@
               };
             })(fuente, turno);
             th.appendChild(cbtn);
+          }
+
+          // Botón naranja "copiar AVERIADOS del día anterior" — solo NOCHE
+          if (turno === 'NOCHE' && !th.querySelector('[data-copyav-btn]')) {
+            var cavbtn = document.createElement('button');
+            cavbtn.setAttribute('data-copyav-btn', turno);
+            cavbtn.type = 'button';
+            __lkStyleCopyAvBtn(cavbtn);
+            cavbtn.title = 'Copiar SOLO averiados de TARDE del día anterior';
+            cavbtn.onclick = function(e) {
+              e.preventDefault();
+              e.stopPropagation();
+              __lkShowCopyAvConfirm();
+            };
+            th.appendChild(cavbtn);
           }
 
           // Botón papelera (vaciar) en los tres turnos
