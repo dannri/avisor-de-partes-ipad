@@ -1528,8 +1528,11 @@
           setTimeout(function(){ __cntMutating = false; }, 50);
         }
 
-        // Encontrar la tabla principal y validar que estamos en ESTADO COMPLETO
-        // (los <th> con colSpan>=5 que dicen NOCHE/URB/TARDE)
+        // Encontrar la tabla principal y los turnos presentes:
+        //   - ESTADO COMPLETO:        3 <th> con colSpan>=5 (NOCHE + URB + TARDE)
+        //   - SERVICIO NOCHE/URB/TARDE: 1 <th> con colSpan>=5 (el turno activo)
+        // En ambos casos pintamos el contador, con tantas columnas como turnos
+        // detectados en pantalla.
         var ths = document.querySelectorAll('th');
         var secciones = { NOCHE: null, URBANIZACIONES: null, TARDE: null };
         for (var i = 0; i < ths.length; i++) {
@@ -1539,8 +1542,13 @@
           else if (raw === 'URBANIZACIONES') secciones.URBANIZACIONES = ths[i];
           else if (raw === 'TARDE') secciones.TARDE = ths[i];
         }
-        if (!secciones.NOCHE || !secciones.URBANIZACIONES || !secciones.TARDE) {
-          // Si no estamos en ESTADO COMPLETO, retirar contenedores huérfanos y limpiar overlays
+        var turnosPresentes = [];
+        if (secciones.NOCHE) turnosPresentes.push('NOCHE');
+        if (secciones.URBANIZACIONES) turnosPresentes.push('URBANIZACIONES');
+        if (secciones.TARDE) turnosPresentes.push('TARDE');
+        if (turnosPresentes.length === 0) {
+          // No estamos en ESTADO COMPLETO ni en ninguna pantalla SERVICIO:
+          // retirar contenedores huérfanos y limpiar overlays
           var huerfanos = document.querySelectorAll('[id^="__cnt_"]');
           var overlays = document.querySelectorAll('td[data-cnt-aver-overlay="1"]');
           if (huerfanos.length > 0 || overlays.length > 0) {
@@ -1557,24 +1565,25 @@
           return;
         }
 
-        // Buscar la <table> principal
-        var th0 = secciones.NOCHE;
+        // Buscar la <table> principal (a partir del primer <th> encontrado)
+        var th0 = secciones[turnosPresentes[0]];
         var tabla = th0;
         while (tabla && tabla.tagName !== 'TABLE') tabla = tabla.parentNode;
         if (!tabla) return;
 
-        // --- Computar rangos horizontales (x1..x2) de cada turno usando las cabeceras ---
+        // --- Computar rangos horizontales (x1..x2) solo de los turnos presentes ---
         var rangos = {};
-        ['NOCHE','URBANIZACIONES','TARDE'].forEach(function(t) {
+        turnosPresentes.forEach(function(t) {
           var th = secciones[t];
           var r = th.getBoundingClientRect();
           rangos[t] = { left: r.left, right: r.right };
         });
 
         function turnoDeX(cx) {
-          if (cx >= rangos.NOCHE.left && cx <= rangos.NOCHE.right) return 'NOCHE';
-          if (cx >= rangos.URBANIZACIONES.left && cx <= rangos.URBANIZACIONES.right) return 'URBANIZACIONES';
-          if (cx >= rangos.TARDE.left && cx <= rangos.TARDE.right) return 'TARDE';
+          for (var k = 0; k < turnosPresentes.length; k++) {
+            var t = turnosPresentes[k];
+            if (cx >= rangos[t].left && cx <= rangos[t].right) return t;
+          }
           return null;
         }
 
@@ -1783,9 +1792,9 @@
         var fullHtml = '';
         fullHtml += '<div style="font-size:12px;font-weight:700;text-align:center;color:#374151;text-transform:uppercase;letter-spacing:0.1em;padding:6px 0;background:#f9fafb;border-bottom:1px solid #e5e7eb;border-top-left-radius:10px;border-top-right-radius:10px;">&#9660; Camiones pendientes de descarga</div>';
         fullHtml += '<div style="display:flex;gap:8px;">';
-        fullHtml += bloqueTurno('NOCHE');
-        fullHtml += bloqueTurno('URBANIZACIONES');
-        fullHtml += bloqueTurno('TARDE');
+        for (var _ti = 0; _ti < turnosPresentes.length; _ti++) {
+          fullHtml += bloqueTurno(turnosPresentes[_ti]);
+        }
         fullHtml += '</div>';
 
         // Comparar con el contenido actual para no escribir si no cambia (evita loop con observer)
