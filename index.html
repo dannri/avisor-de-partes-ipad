@@ -56,6 +56,17 @@
       background-color: #f3f4f6 !important;
     }
 
+    /* Letra "A" del botón naranja "copiar averiados" — pseudo-elemento para que
+       el texto NO contamine th.textContent (rompía la detección NOCHE/URB/TARDE
+       de injectContadores e injectEstadoLocks). */
+    [data-copyav-btn]::after {
+      content: 'A';
+      font-size: 11px;
+      font-weight: 900;
+      line-height: 1;
+      letter-spacing: -0.5px;
+    }
+
     /* Force every table row to have a fixed height regardless of content/zoom.
        The yellow gap on row 3137 happens because the app gives that row
        height:auto and the flex container lets it stretch to fill space. */
@@ -1108,9 +1119,11 @@
       }
 
       // Botón naranja "copia averiados del día anterior" (solo para NOCHE)
+      // OJO: la letra "A" se renderiza vía CSS pseudo-elemento ::after en el <style> del head,
+      // así NO contamina th.textContent (rompía injectContadores).
       function __lkStyleCopyAvBtn(btn) {
         btn.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;margin-left:6px;padding:5px 12px;border-radius:9999px;border:2px solid #f97316;background:#ffedd5;color:#c2410c;cursor:pointer;vertical-align:middle;line-height:0;transition:all 0.15s;gap:2px;';
-        btn.innerHTML = __SVG_COPY + '<span style="font-size:11px;font-weight:900;line-height:1;letter-spacing:-0.5px">A</span>';
+        btn.innerHTML = __SVG_COPY;
       }
 
       function __lkShowCopyAvConfirm() {
