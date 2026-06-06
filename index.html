@@ -1935,6 +1935,29 @@
         } catch (e) {}
       }
 
+      function tintarTextosAveriado() {
+        try {
+          var filas = document.querySelectorAll('table tr');
+          for (var i = 0; i < filas.length; i++) {
+            var tr = filas[i];
+            if (!__cntEsAveriadoDOM(tr)) continue;
+            var tds = tr.querySelectorAll('td');
+            for (var j = 0; j < tds.length; j++) {
+              var td = tds[j];
+              if (td.dataset && td.dataset.avTinted === '1') continue;
+              var raw = (td.textContent || '').trim();
+              if (/^\d{4}/.test(raw) && raw.length < 12) continue;
+              td.style.color = '#dc2626';
+              var kids = td.querySelectorAll('*');
+              for (var k = 0; k < kids.length; k++) {
+                kids[k].style.color = '#dc2626';
+              }
+              if (td.dataset) td.dataset.avTinted = '1';
+            }
+          }
+        } catch (e) {}
+      }
+
       // ── Navegación de fecha ◀ / ▶ ────────────────────────────────────────────
       function injectDateNav() {
         var inputs = document.querySelectorAll('input[type="date"]');
@@ -2152,6 +2175,7 @@
         try { injectEstadoLocks(); } catch(e) {}
         try { injectContadores(); } catch(e) {}
         try { tintarFilasGris(); } catch(e) {}
+        try { tintarTextosAveriado(); } catch(e) {}
         try { gestionarScrolliPad(); } catch(e) {}
         try { injectDateNav(); } catch(e) {}
         try { injectAveriasFilter(); } catch(e) {}
