@@ -1945,15 +1945,15 @@
             var tds = tr.children;
             if (!tds || tds.length === 0) continue;
 
-            // Marcar (una sola vez) la celda del Nº de vehículo para excluirla
-            // del rojo: su número va en blanco sobre fondo rojo, no debe teñirse.
-            var celdaVeh = null;
-            for (var c = 0; c < Math.min(tds.length, 4); c++) {
+            // Marcar TODAS las celdas de Nº de vehículo de la fila para excluirlas
+            // del rojo. En ESTADO COMPLETO hay 3 (una por servicio: NOCHE, URB y
+            // TARDE); el número va en blanco sobre su fondo rojo y NUNCA debe
+            // teñirse (si no, en URB/TARDE quedaba rojo sobre rojo = invisible).
+            for (var c = 0; c < tds.length; c++) {
               var raw = (tds[c].textContent || '').trim();
-              if (/^\d{4}/.test(raw) && raw.length < 12) { celdaVeh = tds[c]; break; }
-            }
-            if (celdaVeh && celdaVeh.dataset && celdaVeh.dataset.cntNumcell !== '1') {
-              celdaVeh.dataset.cntNumcell = '1';
+              if (/^\d{4}$/.test(raw) && tds[c].dataset && tds[c].dataset.cntNumcell !== '1') {
+                tds[c].dataset.cntNumcell = '1';
+              }
             }
 
             // Estado de avería REAL en este instante (se relee el DOM cada pasada,
