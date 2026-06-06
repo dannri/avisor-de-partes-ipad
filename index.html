@@ -43,6 +43,17 @@
     table tr td[class*="bg-blue-100"] {
       background-color: #f3f4f6 !important; /* gray-100 */
     }
+
+    /* v1.5 — Texto rojo de TODA la fila SOLO cuando el vehículo está averiado
+       (casilla "A"). El color lo controla este CSS según el atributo
+       data-cnt-averiado del <tr>, que tintarTextosAveriado() pone/quita en
+       cada pasada (reversible: nunca quedan rojos pegados). Se excluye la celda
+       del Nº de vehículo (data-cnt-numcell) para no teñir el número de rojo
+       sobre su propio fondo rojo. */
+    tr[data-cnt-averiado="1"] td:not([data-cnt-numcell="1"]),
+    tr[data-cnt-averiado="1"] td:not([data-cnt-numcell="1"]) * {
+      color: #dc2626 !important;
+    }
     table tr td[style*="background-color: rgb(239, 246, 255)"],
     table tr td[style*="background-color: rgb(219, 234, 254)"],
     table tr td[style*="background: rgb(239, 246, 255)"],
@@ -879,21 +890,85 @@
         return null;
       }
 
-      // Copia los datos de TARDE del día anterior desde el estado React hacia NOCHE del día actual.
-      function __lkCopyTardeAyer(destino) {
+      // ─────────────────────────────────────────────────────────────────────
+      // Motor robusto de escritura por fiber (copia / vaciado).
+      //
+      // Problema que resuelve: las versiones anteriores hacían UNA pasada y
+      // disparaban 4×Nfilas escrituras de golpe; React las batchea/re-renderiza
+      // y algunas se pisaban → había que pulsar 2 veces y a veces se saltaba una
+      // fila. Este motor ESCRIBE, VERIFICA fila a fila contra el objetivo y
+      // REESCRIBE solo lo que aún no coincide, repitiendo hasta converger.
+      //
+      //   destino : 'NOCHE' | 'URBANIZACIONES' | 'TARDE'
+      //   planFn(props) : objetivo {estado,cargaNo,cargaSiTipo,otros} de esa
+      //                   fila, o null si la fila no participa.
+      //   onDone(aplicadas, objetivo) : aviso final.
+      var __LK_FIELDS = ['estado', 'cargaNo', 'cargaSiTipo', 'otros'];
+      function __lkFieldDefault(field) {
+        return field === 'cargaNo' ? false : (field === 'estado' ? null : '');
+      }
+      function __lkNorm(v, field) { return (typeof v === 'undefined') ? __lkFieldDefault(field) : v; }
+      function __lkPick4(o) {
+        var r = {};
+        for (var i = 0; i < __LK_FIELDS.length; i++) r[__LK_FIELDS[i]] = __lkNorm(o[__LK_FIELDS[i]], __LK_FIELDS[i]);
+        return r;
+      }
+
+      function __lkApplyByFiber(destino, planFn, onDone) {
+        var updKey = destino === 'NOCHE' ? 'onUpdateN' : (destino === 'URBANIZACIONES' ? 'onUpdateU' : 'onUpdateT');
+        var datKey = destino === 'NOCHE' ? 'nDatos'   : (destino === 'URBANIZACIONES' ? 'uDatos'    : 'tDatos');
+
+        function pass(intento) {
+          try {
+            var trs = document.querySelectorAll('tbody tr');
+            var vistos = {};
+            var objetivo = 0, coinciden = 0, pendientes = 0;
+            for (var i = 0; i < trs.length; i++) {
+              var props = __lkReadRowFiber(trs[i]);
+              if (!props) continue;
+              var update = props[updKey];
+              if (typeof update !== 'function') continue;
+              var vid = String(props.vehiculoId);
+              if (vistos[vid]) continue;        // misma fila puede repetirse en el DOM
+
+              var plan = null;
+              try { plan = planFn(props); } catch (e) { plan = null; }
+              if (!plan) continue;              // esta fila no participa
+              vistos[vid] = 1;
+              objetivo++;
+
+              // ¿El destino ya coincide con el objetivo?
+              var cur = props[datKey] || {};
+              var igual = true;
+              for (var f = 0; f < __LK_FIELDS.length; f++) {
+                if (__lkNorm(cur[__LK_FIELDS[f]], __LK_FIELDS[f]) !== __lkNorm(plan[__LK_FIELDS[f]], __LK_FIELDS[f])) { igual = false; break; }
+              }
+              if (igual) { coinciden++; continue; }
+
+              // Aún no coincide → (re)escribir los 4 campos.
+              for (var g = 0; g < __LK_FIELDS.length; g++) {
+                try { update(props.vehiculoId, __LK_FIELDS[g], __lkNorm(plan[__LK_FIELDS[g]], __LK_FIELDS[g])); } catch (e) {}
+              }
+              pendientes++;
+            }
+
+            // Aún quedan filas sin cuajar → otra pasada tras dejar respirar a React.
+            if (pendientes > 0 && intento < 8) {
+              setTimeout(function() { pass(intento + 1); }, 160);
+              return;
+            }
+            try { onDone(coinciden, objetivo); } catch (e) {}
+          } catch (e) {}
+        }
+        pass(0);
+      }
+
+      // Resuelve el doc de TARDE de ayer (reintentando si aún se está cargando)
+      // y lanza la copia hacia NOCHE. soloAveriados=true → solo estado === 'A'.
+      function __lkResolveTardeAyer(soloAveriados, intento) {
         try {
-          // Verificar candado
-          var turnoActivo = __lkReadTurnoActivo();
-          if (turnoActivo !== destino) {
-            __lkShowAlert('Para copiar a ' + destino + ', primero desbloquea su candado.');
-            return false;
-          }
-
-          // Obtener fecha actual del fiber (formato YYYY-MM-DD)
           var fechaRaw = __lkReadFechaActual();
-          if (!fechaRaw) { __lkShowAlert('No se pudo leer la fecha actual.'); return false; }
-
-          // Calcular fechaStr de ayer en formato DD/MM/YYYY (igual que usa la app)
+          if (!fechaRaw) { __lkShowAlert('No se pudo leer la fecha actual.'); return; }
           var parts = fechaRaw.split('-');
           var ayerDate;
           if (parts[0].length === 4) {
@@ -904,165 +979,90 @@
           var dd = String(ayerDate.getDate()).padStart(2, '0');
           var mm = String(ayerDate.getMonth() + 1).padStart(2, '0');
           var yyyy = ayerDate.getFullYear();
-          var fechaStrAyer1 = dd + '/' + mm + '/' + yyyy;
-          var fechaStrAyer2 = String(ayerDate.getDate()) + '/' + String(ayerDate.getMonth()+1) + '/' + yyyy;
+          var etq = dd + '/' + mm + '/' + yyyy;
+          var f1 = dd + '/' + mm + '/' + yyyy;                                                  // "18/05/2026"
+          var f2 = String(ayerDate.getDate()) + '/' + String(ayerDate.getMonth() + 1) + '/' + yyyy; // "18/5/2026"
 
-          // Leer array de servicios del estado React
           var servicios = __lkReadServicios();
-          if (!servicios) { __lkShowAlert('No se pudo leer el estado de la app.'); return false; }
-
-          // Buscar el documento TARDE del día anterior
           var docTarde = null;
-          for (var i = 0; i < servicios.length; i++) {
-            var sv = servicios[i];
-            if (sv.turno === 'TARDE' && (sv.fechaStr === fechaStrAyer1 || sv.fechaStr === fechaStrAyer2)) {
-              docTarde = sv;
-              break;
+          if (servicios) {
+            for (var i = 0; i < servicios.length; i++) {
+              var sv = servicios[i];
+              if (sv.turno === 'TARDE' && (sv.fechaStr === f1 || sv.fechaStr === f2)) { docTarde = sv; break; }
             }
           }
-
           if (!docTarde || !docTarde.registros) {
-            __lkShowAlert('No hay datos de TARDE del ' + dd + '/' + mm + '/' + yyyy + '.');
-            return false;
+            // Puede que los datos de ayer aún se estén cargando en memoria: reintentar.
+            if (intento < 6) { setTimeout(function() { __lkResolveTardeAyer(soloAveriados, intento + 1); }, 200); return; }
+            __lkShowAlert('No hay datos de TARDE del ' + etq + '.');
+            return;
           }
 
-          // Escribir en NOCHE vía fiber de cada fila
-          var trs = document.querySelectorAll('tbody tr');
-          var count = 0;
-          var fields = ['estado', 'cargaNo', 'cargaSiTipo', 'otros'];
-          for (var i = 0; i < trs.length; i++) {
-            var props = __lkReadRowFiber(trs[i]);
-            if (!props) continue;
-            var update = props.onUpdateN;
-            if (typeof update !== 'function') continue;
-            var vid = String(props.vehiculoId);
-            var reg = docTarde.registros[vid];
-            if (!reg) continue;
-            for (var f = 0; f < fields.length; f++) {
-              var field = fields[f];
-              var val = reg[field];
-              if (typeof val === 'undefined') val = (field === 'cargaNo' ? false : (field === 'estado' ? null : ''));
-              try { update(props.vehiculoId, field, val); } catch(e) {}
+          var regs = docTarde.registros;
+          __lkApplyByFiber('NOCHE',
+            function(props) {
+              var r = regs[String(props.vehiculoId)];
+              if (!r) return null;
+              if (soloAveriados && r.estado !== 'A') return null;
+              return __lkPick4(r);
+            },
+            function(aplicadas, objetivo) {
+              if (objetivo === 0) {
+                __lkShowAlert(soloAveriados
+                  ? ('No se encontraron averiados en TARDE del ' + etq + '.')
+                  : ('No hay registros de TARDE del ' + etq + ' que copiar.'));
+              } else if (aplicadas >= objetivo) {
+                __lkShowAlert('Copiados ' + objetivo + (soloAveriados ? ' averiados' : ' registros') + ' de TARDE (' + etq + ') a NOCHE.');
+              } else {
+                __lkShowAlert('Copiados ' + aplicadas + ' de ' + objetivo + (soloAveriados ? ' averiados' : ' registros') + '. Vuelve a pulsar para completar.');
+              }
             }
-            count++;
+          );
+        } catch (e) {}
+      }
+
+      // Copia TODA la TARDE del día anterior a NOCHE (botón azul en NOCHE).
+      function __lkCopyTardeAyer(destino) {
+        try {
+          if (__lkReadTurnoActivo() !== 'NOCHE') {
+            __lkShowAlert('Para copiar a NOCHE, primero desbloquea su candado.');
+            return;
           }
-          __lkShowAlert('Copiados ' + count + ' registros de TARDE (' + dd + '/' + mm + '/' + yyyy + ') a NOCHE.');
-          return count;
-        } catch (e) {
-          return false;
-        }
+          __lkResolveTardeAyer(false, 0);
+        } catch (e) {}
       }
 
       // Copia SOLO los averiados (estado === 'A') de TARDE del día anterior a NOCHE.
       function __lkCopyAveriadosAyer() {
         try {
-          var destino = 'NOCHE';
-          var turnoActivo = __lkReadTurnoActivo();
-          if (turnoActivo !== destino) {
+          if (__lkReadTurnoActivo() !== 'NOCHE') {
             __lkShowAlert('Para copiar a NOCHE, primero desbloquea su candado.');
-            return false;
+            return;
           }
-
-          var fechaRaw = __lkReadFechaActual();
-          if (!fechaRaw) { __lkShowAlert('No se pudo leer la fecha actual.'); return false; }
-
-          var parts = fechaRaw.split('-');
-          var ayerDate;
-          if (parts[0].length === 4) {
-            ayerDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]) - 1);
-          } else {
-            ayerDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]) - 1);
-          }
-          var dd = String(ayerDate.getDate()).padStart(2, '0');
-          var mm = String(ayerDate.getMonth() + 1).padStart(2, '0');
-          var yyyy = ayerDate.getFullYear();
-          var fechaStrAyer1 = dd + '/' + mm + '/' + yyyy;
-          var fechaStrAyer2 = String(ayerDate.getDate()) + '/' + String(ayerDate.getMonth()+1) + '/' + yyyy;
-
-          var servicios = __lkReadServicios();
-          if (!servicios) { __lkShowAlert('No se pudo leer el estado de la app.'); return false; }
-
-          var docTarde = null;
-          for (var i = 0; i < servicios.length; i++) {
-            var sv = servicios[i];
-            if (sv.turno === 'TARDE' && (sv.fechaStr === fechaStrAyer1 || sv.fechaStr === fechaStrAyer2)) {
-              docTarde = sv;
-              break;
-            }
-          }
-
-          if (!docTarde || !docTarde.registros) {
-            __lkShowAlert('No hay datos de TARDE del ' + dd + '/' + mm + '/' + yyyy + '.');
-            return false;
-          }
-
-          var trs = document.querySelectorAll('tbody tr');
-          var count = 0;
-          var fields = ['estado', 'cargaNo', 'cargaSiTipo', 'otros'];
-          for (var i = 0; i < trs.length; i++) {
-            var props = __lkReadRowFiber(trs[i]);
-            if (!props) continue;
-            var update = props.onUpdateN;
-            if (typeof update !== 'function') continue;
-            var vid = String(props.vehiculoId);
-            var reg = docTarde.registros[vid];
-            if (!reg) continue;
-            // Solo filas averiadas en la TARDE de ayer
-            if (reg.estado !== 'A') continue;
-            for (var f = 0; f < fields.length; f++) {
-              var field = fields[f];
-              var val = reg[field];
-              if (typeof val === 'undefined') val = (field === 'cargaNo' ? false : (field === 'estado' ? null : ''));
-              try { update(props.vehiculoId, field, val); } catch(e) {}
-            }
-            count++;
-          }
-          if (count === 0) {
-            __lkShowAlert('No se encontraron averiados en TARDE del ' + dd + '/' + mm + '/' + yyyy + '.');
-          } else {
-            __lkShowAlert('Copiados ' + count + ' averiados de TARDE (' + dd + '/' + mm + '/' + yyyy + ') a NOCHE.');
-          }
-          return count;
-        } catch (e) {
-          return false;
-        }
+          __lkResolveTardeAyer(true, 0);
+        } catch (e) {}
       }
 
-      // Realiza la copia turnoFuente → turnoDestino en todas las filas visibles.
+      // Copia el turno anterior del MISMO día (URBANIZACIONES←NOCHE, TARDE←URBANIZACIONES).
       function __lkCopyTurno(fuente, destino) {
         try {
-          // Verificar que el candado destino está abierto
-          var turnoActivo = __lkReadTurnoActivo();
-          if (turnoActivo !== destino) {
+          if (__lkReadTurnoActivo() !== destino) {
             __lkShowAlert('Para copiar a ' + destino + ', primero desbloquea su candado.');
-            return false;
+            return;
           }
-
-          var trs = document.querySelectorAll('tbody tr');
-          var count = 0;
-          var fields = ['estado', 'cargaNo', 'cargaSiTipo', 'otros'];
           var srcKey = fuente === 'NOCHE' ? 'nDatos' : (fuente === 'URBANIZACIONES' ? 'uDatos' : 'tDatos');
-          var updKey = destino === 'NOCHE' ? 'onUpdateN' : (destino === 'URBANIZACIONES' ? 'onUpdateU' : 'onUpdateT');
-
-          for (var i = 0; i < trs.length; i++) {
-            var props = __lkReadRowFiber(trs[i]);
-            if (!props) continue;
-            var src = props[srcKey];
-            var update = props[updKey];
-            if (!src || typeof update !== 'function') continue;
-            for (var f = 0; f < fields.length; f++) {
-              var field = fields[f];
-              var val = src[field];
-              // Pasar todos los campos (incluso null/false/"") para sobreescribir el destino
-              if (typeof val === 'undefined') val = (field === 'cargaNo' ? false : (field === 'estado' ? null : ''));
-              try { update(props.vehiculoId, field, val); } catch (e) {}
+          __lkApplyByFiber(destino,
+            function(props) {
+              var s = props[srcKey];
+              return s ? __lkPick4(s) : null;
+            },
+            function(aplicadas, objetivo) {
+              if (objetivo === 0) __lkShowAlert('No se encontraron filas para copiar.');
+              else if (aplicadas >= objetivo) __lkShowAlert('Copiados ' + objetivo + ' registros de ' + fuente + ' a ' + destino + '.');
+              else __lkShowAlert('Copiados ' + aplicadas + ' de ' + objetivo + ' registros. Vuelve a pulsar para completar.');
             }
-            count++;
-          }
-          return count;
-        } catch (e) {
-          return false;
-        }
+          );
+        } catch (e) {}
       }
 
       function __lkShowAlert(msg) {
@@ -1105,10 +1105,8 @@
             // Copia asíncrona desde Firestore (día anterior)
             __lkCopyTardeAyer(destino);
           } else {
-            var res = __lkCopyTurno(fuente, destino);
-            if (res === false) return;
-            if (res === 0) __lkShowAlert('No se encontraron filas para copiar.');
-            else __lkShowAlert('Copiados ' + res + ' registros de ' + fuente + ' a ' + destino + '.');
+            // El aviso lo muestra __lkCopyTurno al converger (escribe en varias pasadas).
+            __lkCopyTurno(fuente, destino);
           }
         };
       }
@@ -1154,30 +1152,22 @@
         btn.innerHTML = __SVG_TRASH;
       }
 
-      // Vacía todos los registros del turno destino.
+      // Vacía todos los registros del turno destino (con verificación + reintentos).
       function __lkClearTurno(destino) {
         try {
-          var turnoActivo = __lkReadTurnoActivo();
-          if (turnoActivo !== destino) {
+          if (__lkReadTurnoActivo() !== destino) {
             __lkShowAlert('Para vaciar ' + destino + ', primero desbloquea su candado.');
-            return false;
+            return;
           }
-          var trs = document.querySelectorAll('tbody tr');
-          var count = 0;
-          var updKey = destino === 'NOCHE' ? 'onUpdateN' : (destino === 'URBANIZACIONES' ? 'onUpdateU' : 'onUpdateT');
-          var empty = { estado: null, cargaNo: false, cargaSiTipo: '', otros: '' };
-          for (var i = 0; i < trs.length; i++) {
-            var props = __lkReadRowFiber(trs[i]);
-            if (!props) continue;
-            var update = props[updKey];
-            if (typeof update !== 'function') continue;
-            for (var f in empty) {
-              try { update(props.vehiculoId, f, empty[f]); } catch (e) {}
+          __lkApplyByFiber(destino,
+            function(props) { return { estado: null, cargaNo: false, cargaSiTipo: '', otros: '' }; },
+            function(aplicadas, objetivo) {
+              if (objetivo === 0) __lkShowAlert('No se encontraron filas para vaciar.');
+              else if (aplicadas >= objetivo) __lkShowAlert('Vaciados ' + objetivo + ' registros de ' + destino + '.');
+              else __lkShowAlert('Vaciados ' + aplicadas + ' de ' + objetivo + ' registros. Vuelve a pulsar para completar.');
             }
-            count++;
-          }
-          return count;
-        } catch (e) { return false; }
+          );
+        } catch (e) {}
       }
 
       function __lkShowClearConfirm(destino) {
@@ -1228,10 +1218,8 @@
         function tryClear() {
           if (inp.value === pw) {
             close();
-            var res = __lkClearTurno(destino);
-            if (res === false) return;
-            if (res === 0) __lkShowAlert('No se encontraron filas para vaciar.');
-            else __lkShowAlert('Vaciados ' + res + ' registros de ' + destino + '.');
+            // El aviso lo muestra __lkClearTurno al converger (varias pasadas).
+            __lkClearTurno(destino);
           } else {
             err.style.visibility = 'visible';
             inp.value = '';
@@ -1937,22 +1925,50 @@
 
       function tintarTextosAveriado() {
         try {
+          // Limpieza ÚNICA de restos de la implementación v1.4: aquel código
+          // escribía color rojo en línea en cada celda y lo marcaba con
+          // data-av-tinted, sin revertirlo jamás (causa del bug del 3079).
+          if (!tintarTextosAveriado.__cleaned) {
+            tintarTextosAveriado.__cleaned = true;
+            var viejos = document.querySelectorAll('[data-av-tinted="1"]');
+            for (var v = 0; v < viejos.length; v++) {
+              viejos[v].style.color = '';
+              var vk = viejos[v].querySelectorAll('*');
+              for (var vj = 0; vj < vk.length; vj++) vk[vj].style.color = '';
+              try { delete viejos[v].dataset.avTinted; } catch (e2) {}
+            }
+          }
+
           var filas = document.querySelectorAll('table tr');
           for (var i = 0; i < filas.length; i++) {
             var tr = filas[i];
-            if (!__cntEsAveriadoDOM(tr)) continue;
-            var tds = tr.querySelectorAll('td');
-            for (var j = 0; j < tds.length; j++) {
-              var td = tds[j];
-              if (td.dataset && td.dataset.avTinted === '1') continue;
-              var raw = (td.textContent || '').trim();
-              if (/^\d{4}/.test(raw) && raw.length < 12) continue;
-              td.style.color = '#dc2626';
-              var kids = td.querySelectorAll('*');
-              for (var k = 0; k < kids.length; k++) {
-                kids[k].style.color = '#dc2626';
+            var tds = tr.children;
+            if (!tds || tds.length === 0) continue;
+
+            // Marcar (una sola vez) la celda del Nº de vehículo para excluirla
+            // del rojo: su número va en blanco sobre fondo rojo, no debe teñirse.
+            var celdaVeh = null;
+            for (var c = 0; c < Math.min(tds.length, 4); c++) {
+              var raw = (tds[c].textContent || '').trim();
+              if (/^\d{4}/.test(raw) && raw.length < 12) { celdaVeh = tds[c]; break; }
+            }
+            if (celdaVeh && celdaVeh.dataset && celdaVeh.dataset.cntNumcell !== '1') {
+              celdaVeh.dataset.cntNumcell = '1';
+            }
+
+            // Estado de avería REAL en este instante (se relee el DOM cada pasada,
+            // no se confía en ninguna marca anterior).
+            var aver = __cntEsAveriadoDOM(tr);
+
+            // Bidireccional: poner o quitar el marcador según el estado actual.
+            // El color lo aplica/retira el CSS estático → 100% reversible, sin
+            // restos pegados. Sólo se escribe si cambia, para no agitar el DOM.
+            if (aver) {
+              if (tr.getAttribute('data-cnt-averiado') !== '1') {
+                tr.setAttribute('data-cnt-averiado', '1');
               }
-              if (td.dataset) td.dataset.avTinted = '1';
+            } else if (tr.hasAttribute('data-cnt-averiado')) {
+              tr.removeAttribute('data-cnt-averiado');
             }
           }
         } catch (e) {}

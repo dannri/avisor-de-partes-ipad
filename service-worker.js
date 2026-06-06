@@ -1,10 +1,10 @@
-/*
+﻿/*
  * AVISOR DE PARTES - Service Worker
  * Caches all app assets so the iPad PWA works offline after the first load.
  *
  * To force users to pick up a new app version: bump CACHE_VERSION.
  */
-const CACHE_VERSION = 'v15';
+const CACHE_VERSION = 'v16';
 const CACHE_NAME = 'avisor-de-partes-' + CACHE_VERSION;
 
 const PRECACHE_URLS = [
