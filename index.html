@@ -44,14 +44,16 @@
       background-color: #f3f4f6 !important; /* gray-100 */
     }
 
-    /* v1.5 — Texto rojo de TODA la fila SOLO cuando el vehículo está averiado
-       (casilla "A"). El color lo controla este CSS según el atributo
-       data-cnt-averiado del <tr>, que tintarTextosAveriado() pone/quita en
-       cada pasada (reversible: nunca quedan rojos pegados). Se excluye la celda
-       del Nº de vehículo (data-cnt-numcell) para no teñir el número de rojo
-       sobre su propio fondo rojo. */
-    tr[data-cnt-averiado="1"] td:not([data-cnt-numcell="1"]),
-    tr[data-cnt-averiado="1"] td:not([data-cnt-numcell="1"]) * {
+    /* v1.6 — Texto rojo de avería POR CELDA, agrupado por turno.
+       Reemplaza al selector v1.5 a nivel <tr>, que en ESTADO COMPLETO teñía los
+       3 turnos aunque solo uno estuviera averiado (bug del 3078 en TARDE). Ahora
+       tintarTextosAveriado() marca cada <td> averiado de su turno con
+       data-cnt-averiado-cell="1"; los numcells (data-cnt-numcell) nunca reciben
+       la marca, así que su número va en blanco sobre su propio fondo rojo. El
+       color lo controla este CSS según el atributo, que la función pone/quita en
+       cada pasada → 100% reversible, sin rojos pegados. */
+    td[data-cnt-averiado-cell="1"]:not([data-cnt-numcell="1"]),
+    td[data-cnt-averiado-cell="1"]:not([data-cnt-numcell="1"]) * {
       color: #dc2626 !important;
     }
     table tr td[style*="background-color: rgb(239, 246, 255)"],
@@ -1923,13 +1925,18 @@
         } catch (e) {}
       }
 
+      // v1.6 — Texto rojo de avería POR CELDA, agrupado por turno.
+      // El bug de v1.5: marcaba el <tr> entero, así que en ESTADO COMPLETO (3
+      // turnos en la misma fila) teñía NOCHE+URB+TARDE aunque la avería fuera de
+      // un solo turno (caso 3078: averiado en NOCHE/URB pero NO en TARDE → TARDE
+      // salía rojo). Ahora detectamos la avería de CADA turno por separado (igual
+      // que injectContadores) y marcamos sólo las celdas de los turnos averiados.
       function tintarTextosAveriado() {
         try {
-          // Limpieza ÚNICA de restos de la implementación v1.4: aquel código
-          // escribía color rojo en línea en cada celda y lo marcaba con
-          // data-av-tinted, sin revertirlo jamás (causa del bug del 3079).
+          // Migración ÚNICA: limpiar restos de implementaciones anteriores.
           if (!tintarTextosAveriado.__cleaned) {
             tintarTextosAveriado.__cleaned = true;
+            // v1.4: color rojo en línea (data-av-tinted) sin revertir
             var viejos = document.querySelectorAll('[data-av-tinted="1"]');
             for (var v = 0; v < viejos.length; v++) {
               viejos[v].style.color = '';
@@ -1937,38 +1944,187 @@
               for (var vj = 0; vj < vk.length; vj++) vk[vj].style.color = '';
               try { delete viejos[v].dataset.avTinted; } catch (e2) {}
             }
+            // v1.5: atributo a nivel <tr> (causa del bug del 3078)
+            var viejasFilas = document.querySelectorAll('tr[data-cnt-averiado]');
+            for (var vf = 0; vf < viejasFilas.length; vf++) {
+              viejasFilas[vf].removeAttribute('data-cnt-averiado');
+            }
+            // v1.5: data-cnt-numcell pegado en celdas que React pudo reutilizar
+            var viejosNum = document.querySelectorAll('[data-cnt-numcell="1"]');
+            for (var vn = 0; vn < viejosNum.length; vn++) {
+              viejosNum[vn].removeAttribute('data-cnt-numcell');
+            }
           }
 
-          var filas = document.querySelectorAll('table tr');
-          for (var i = 0; i < filas.length; i++) {
-            var tr = filas[i];
+          // Lectura "real" del texto de una celda (solo DOM, sin fibers).
+          // Equivalente a readCellText() de injectContadores para que la detección
+          // de la "A" coincida entre el contador y el tinte.
+          function leerCelda(td) {
+            try {
+              var sel = td.querySelector('select');
+              if (sel) {
+                var sv = (sel.value || '').trim();
+                if (!sv) return '';
+                if (sel.selectedIndex > 0 && sel.options[sel.selectedIndex]) {
+                  return (sel.options[sel.selectedIndex].textContent || sv).trim();
+                }
+                return sv;
+              }
+              var inp = td.querySelector('input, textarea');
+              if (inp) return (inp.value || '').trim();
+              if (td.querySelector('option, datalist')) {
+                var clone = td.cloneNode(true);
+                var del = clone.querySelectorAll('option, datalist');
+                for (var di = 0; di < del.length; di++) del[di].remove();
+                return (clone.textContent || '').trim();
+              }
+              return (td.textContent || '').trim();
+            } catch (eR) {
+              return (td.textContent || '').trim();
+            }
+          }
+
+          // ¿La celda (o algún hijo) tiene fondo rojo fuerte? Reutiliza el mismo
+          // umbral que el contador (__cntEsRojoFuerte) para no discrepar.
+          function celdaTieneRojoFuerte(td) {
+            try {
+              var cs = window.getComputedStyle(td);
+              if (__cntEsRojoFuerte(cs.backgroundColor || '')) return true;
+              var kids = td.querySelectorAll('*');
+              for (var k = 0; k < kids.length; k++) {
+                var kcs = window.getComputedStyle(kids[k]);
+                if (__cntEsRojoFuerte(kcs.backgroundColor || '')) return true;
+                var cn = (kids[k].className || '');
+                if (typeof cn === 'string' && (cn.indexOf('bg-red-5') !== -1 ||
+                    cn.indexOf('bg-red-6') !== -1 || cn.indexOf('bg-red-7') !== -1)) return true;
+              }
+            } catch (eF) {}
+            return false;
+          }
+
+          // 1) Detectar los turnos presentes por las cabeceras colSpan>=5 (criterio
+          // idéntico a injectContadores). Si no hay ninguna, no es pantalla relevante.
+          var ths = document.querySelectorAll('th');
+          var secciones = { NOCHE: null, URBANIZACIONES: null, TARDE: null };
+          for (var h = 0; h < ths.length; h++) {
+            if (ths[h].colSpan < 5) continue;
+            var rawH = (ths[h].textContent || '').replace(/[^A-ZÁÉÍÓÚÜÑ]/g, '').toUpperCase();
+            if (rawH.endsWith('NOCHE')) secciones.NOCHE = ths[h];
+            else if (rawH.endsWith('URBANIZACIONES')) secciones.URBANIZACIONES = ths[h];
+            else if (rawH.endsWith('TARDE')) secciones.TARDE = ths[h];
+          }
+          var turnosPresentes = [];
+          if (secciones.NOCHE) turnosPresentes.push('NOCHE');
+          if (secciones.URBANIZACIONES) turnosPresentes.push('URBANIZACIONES');
+          if (secciones.TARDE) turnosPresentes.push('TARDE');
+
+          if (turnosPresentes.length === 0) {
+            // Pantalla no relevante: retirar marcas que hubieran quedado (reversible).
+            var sueltas0 = document.querySelectorAll('td[data-cnt-averiado-cell="1"]');
+            for (var s0 = 0; s0 < sueltas0.length; s0++) sueltas0[s0].removeAttribute('data-cnt-averiado-cell');
+            return;
+          }
+
+          var rangos = {};
+          for (var rp = 0; rp < turnosPresentes.length; rp++) {
+            var tName = turnosPresentes[rp];
+            var rr = secciones[tName].getBoundingClientRect();
+            rangos[tName] = { left: rr.left, right: rr.right };
+          }
+          function turnoDeX(cx) {
+            for (var z = 0; z < turnosPresentes.length; z++) {
+              var tz = turnosPresentes[z];
+              if (cx >= rangos[tz].left && cx <= rangos[tz].right) return tz;
+            }
+            return null;
+          }
+
+          var tabla = secciones[turnosPresentes[0]];
+          while (tabla && tabla.tagName !== 'TABLE') tabla = tabla.parentNode;
+          if (!tabla) return;
+
+          var trs = tabla.querySelectorAll('tbody tr');
+          for (var i = 0; i < trs.length; i++) {
+            var tr = trs[i];
             var tds = tr.children;
             if (!tds || tds.length === 0) continue;
 
-            // Marcar TODAS las celdas de Nº de vehículo de la fila para excluirlas
-            // del rojo. En ESTADO COMPLETO hay 3 (una por servicio: NOCHE, URB y
-            // TARDE); el número va en blanco sobre su fondo rojo y NUNCA debe
-            // teñirse (si no, en URB/TARDE quedaba rojo sobre rojo = invisible).
-            for (var c = 0; c < tds.length; c++) {
-              var raw = (tds[c].textContent || '').trim();
-              if (/^\d{4}$/.test(raw) && tds[c].dataset && tds[c].dataset.cntNumcell !== '1') {
-                tds[c].dataset.cntNumcell = '1';
-              }
+            // BARRIDO INCONDICIONAL: quitar todas las marcas de la fila antes de
+            // recalcular. Garantiza reversibilidad: una celda que deja de
+            // clasificarse (ancho 0, fuera de rango un frame) pierde su rojo.
+            var marcadas = tr.querySelectorAll('td[data-cnt-averiado-cell="1"]');
+            for (var mq = 0; mq < marcadas.length; mq++) {
+              marcadas[mq].removeAttribute('data-cnt-averiado-cell');
             }
 
-            // Estado de avería REAL en este instante (se relee el DOM cada pasada,
-            // no se confía en ninguna marca anterior).
-            var aver = __cntEsAveriadoDOM(tr);
+            // Clasificar cada <td> por turno (centro X) — mismo método que el contador.
+            var celdasPorTurno = { NOCHE: [], URBANIZACIONES: [], TARDE: [] };
+            var numcellPorTurno = { NOCHE: null, URBANIZACIONES: null, TARDE: null };
+            for (var c = 0; c < tds.length; c++) {
+              var rect = tds[c].getBoundingClientRect();
+              if (rect.width === 0) continue;
+              var cx = rect.left + rect.width / 2;
+              var tt = turnoDeX(cx);
+              if (tt) celdasPorTurno[tt].push(tds[c]);
+            }
 
-            // Bidireccional: poner o quitar el marcador según el estado actual.
-            // El color lo aplica/retira el CSS estático → 100% reversible, sin
-            // restos pegados. Sólo se escribe si cambia, para no agitar el DOM.
-            if (aver) {
-              if (tr.getAttribute('data-cnt-averiado') !== '1') {
-                tr.setAttribute('data-cnt-averiado', '1');
+            // Identificar el numcell de cada turno (4 dígitos). En ESTADO COMPLETO
+            // hay 3 (uno por turno), cada uno coloreado de forma independiente.
+            for (var c2 = 0; c2 < tds.length; c2++) {
+              var raw2 = (tds[c2].textContent || '').trim();
+              if (!/^\d{4}$/.test(raw2)) continue; // numcell estricto
+              var rc = tds[c2].getBoundingClientRect();
+              if (rc.width === 0) continue;
+              var cxn = rc.left + rc.width / 2;
+              // marcar SIEMPRE como numcell para que nunca se tiña de rojo
+              if (tds[c2].dataset && tds[c2].dataset.cntNumcell !== '1') {
+                tds[c2].dataset.cntNumcell = '1';
               }
-            } else if (tr.hasAttribute('data-cnt-averiado')) {
-              tr.removeAttribute('data-cnt-averiado');
+              // Asignar al turno: dentro de su rango, o el turno contiguo a la derecha
+              // (la columna nº precede a AV en el layout real).
+              var mejor = null;
+              for (var zi = 0; zi < turnosPresentes.length; zi++) {
+                var tzi = turnosPresentes[zi];
+                if (cxn >= rangos[tzi].left && cxn <= rangos[tzi].right) { mejor = tzi; break; }
+              }
+              if (!mejor) {
+                var mejorDist = Infinity;
+                for (var z2 = 0; z2 < turnosPresentes.length; z2++) {
+                  var tz2 = turnosPresentes[z2];
+                  var dd = rangos[tz2].left - cxn; // numcell a la IZQ del rango
+                  if (dd >= 0 && dd < mejorDist) { mejorDist = dd; mejor = tz2; }
+                }
+                if (mejorDist > 200) mejor = null; // hueco enorme = no es la columna contigua
+              }
+              if (mejor) numcellPorTurno[mejor] = tds[c2];
+            }
+
+            // Por cada turno presente: ¿está averiado ESE turno?
+            for (var tp = 0; tp < turnosPresentes.length; tp++) {
+              var turno = turnosPresentes[tp];
+              var celdas = celdasPorTurno[turno];
+              if (celdas.length === 0) continue;
+
+              var esAver = false;
+              // (a) casilla AV con texto "A"
+              for (var a = 0; a < celdas.length; a++) {
+                if (leerCelda(celdas[a]).toUpperCase() === 'A') { esAver = true; break; }
+              }
+              // (b) numcell de ESTE turno con fondo rojo fuerte
+              if (!esAver && numcellPorTurno[turno] && celdaTieneRojoFuerte(numcellPorTurno[turno])) {
+                esAver = true;
+              }
+
+              if (!esAver) continue;
+
+              // Aplicar rojo a las celdas de datos del turno (nunca al numcell).
+              for (var w = 0; w < celdas.length; w++) {
+                var td = celdas[w];
+                if (td.dataset && td.dataset.cntNumcell === '1') continue;
+                if (td.getAttribute('data-cnt-averiado-cell') !== '1') {
+                  td.setAttribute('data-cnt-averiado-cell', '1');
+                }
+              }
             }
           }
         } catch (e) {}
