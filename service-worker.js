@@ -4,7 +4,7 @@
  *
  * To force users to pick up a new app version: bump CACHE_VERSION.
  */
-const CACHE_VERSION = 'v18';
+const CACHE_VERSION = 'v19';
 const CACHE_NAME = 'avisor-de-partes-' + CACHE_VERSION;
 
 const PRECACHE_URLS = [
@@ -15,7 +15,9 @@ const PRECACHE_URLS = [
   './icon-512.png',
   './assets/app.js',
   './assets/app.css',
-  './assets/fondo.jpg'
+  './assets/fondo.jpg',
+  './assets/firebase-app-compat.js',
+  './assets/firebase-firestore-compat.js'
 ];
 
 // Install: pre-cache the app shell
